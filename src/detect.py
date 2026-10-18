@@ -61,20 +61,27 @@ def handle(pkt):
     ts = time.strftime("%H:%M:%S")
     for r, p, s, rf_p in zip(ready, preds, scores, rf_preds):
         total_pkts = r["Total Fwd Packets"] + r["Total Backward Packets"]
-        is_anomaly = (p == -1) or (total_pkts > 10) or (r["Flow Packets/s"] > 10)
+        
+        # RAISED THRESHOLD: Normal web traffic sends ~10-15 packets. 
+        # A DDoS sends 100+. So we set the trigger to 50.
+        is_anomaly = (p == -1) or (total_pkts > 50) or (r["Flow Packets/s"] > 40)
         
         if is_anomaly:
             alert_count += 1
             attack_type = rf_p if rf_p.upper() != "BENIGN" else "Zero-Day / Unknown"
             
             if attack_type == "Zero-Day / Unknown":
-                if r["Flow Packets/s"] > 10 or total_pkts > 20:
+                if r["Flow Packets/s"] > 40 or total_pkts > 50:
                     attack_type = "DDoS / Flood"
-                elif total_pkts > 5 and r["Flow Duration"] < 500000:
+                elif total_pkts > 15 and r["Flow Duration"] < 500000:
                     attack_type = "PortScan"
             
+            # Push to cloud
             push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
             print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type}")
+            
+            # Add a tiny 0.1s delay so the Streamlit UI can render the spike smoothly
+            time.sleep(0.1)
 
 if __name__ == "__main__":
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"

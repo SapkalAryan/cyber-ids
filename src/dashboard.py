@@ -69,5 +69,5 @@ while True:
         else:
             st.info("Waiting for local sniffer to send data to the cloud...")
 
-    time.sleep(3)
+    time.sleep(1)  # Changed from 3 to 1 for smooth live streaming
     st.rerun()
