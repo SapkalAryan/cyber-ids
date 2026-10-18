@@ -17,16 +17,16 @@ st.caption("Live ML Anomaly Detection Synced from Local Wi-Fi Sniffer")
 
 with st.sidebar:
     st.header("Red Team Controls")
-    st.write("To simulate a DDoS, run this in your local admin terminal:")
-    st.code('python -c "from scapy.all import *; send(IP(dst=\\"10.98.205.229\\")/ICMP(), count=100)"')
+    st.write("Run this in your local command prompt to simulate a TCP DDoS:")
+    st.code('python -c "from scapy.all import *; send(IP(dst=\\"10.98.205.229\\")/TCP(dport=80, flags=\\"S\\"), count=200, inter=0.01)"')
     
     if st.button("Clear Cloud Database"):
         supabase.table("alerts").delete().neq("id", 0).execute()
         st.success("Database cleared!")
 
-# THIS IS THE MAGIC FIX FOR FLICKERING
-@st.fragment(run_every="2s") 
-def render_dashboard():
+# The fragment ensures only this section updates, stopping the flickering
+@st.fragment(run_every="2s")
+def render_live_data():
     try:
         response = supabase.table("alerts").select("*").order("id", desc=True).limit(100).execute()
         alerts = pd.DataFrame(response.data)
@@ -35,7 +35,7 @@ def render_dashboard():
         return
 
     if not alerts.empty:
-        alerts = alerts.iloc[::-1] # Reverse to show oldest to newest
+        alerts = alerts.iloc[::-1]
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Alerts", len(alerts))
@@ -64,5 +64,5 @@ def render_dashboard():
     else:
         st.info("Waiting for local sniffer to send data to the cloud...")
 
-# Call the function once to start the loop
-render_dashboard()
+# Render the fragment
+render_live_data()

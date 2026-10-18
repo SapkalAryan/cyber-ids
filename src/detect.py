@@ -43,7 +43,7 @@ def handle(pkt):
     pkt_count += 1
     extractor.update(pkt)
     
-    if pkt_count % 50 != 0:
+    if pkt_count % 20 != 0:
         return
         
     ready = extractor.flush_ready()
@@ -63,22 +63,21 @@ def handle(pkt):
         total_pkts = r["Total Fwd Packets"] + r["Total Backward Packets"]
         pkt_rate = r["Flow Packets/s"]
         
-        # Anomaly if ML says so, OR if packet rate is INSANELY high (> 500 p/s)
-        is_anomaly = (p == -1) or (pkt_rate > 500)
+        # Detect if it's an anomaly (either ML says so, or it's a huge volume)
+        is_anomaly = (p == -1) or (total_pkts > 20) or (pkt_rate > 50)
         
         if is_anomaly:
             alert_count += 1
             
-            # Strict ML classification, fallback to heuristics
+            # ML Classification
             attack_type = str(rf_p) if str(rf_p).upper() != "BENIGN" else "Zero-Day / Unknown"
             
-            # If it's a massive rate, it's definitely a flood
-            if pkt_rate > 500:
+            # Heuristic override for massive floods
+            if total_pkts > 20 or pkt_rate > 50:
                 attack_type = "DDoS / Flood"
                 
             push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
-            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Rate: {pkt_rate:.0f} p/s")
-
+            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Pkts: {total_pkts}")
 if __name__ == "__main__":
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
     print(f"Sniffing on '{iface}' and syncing to Cloud...")
