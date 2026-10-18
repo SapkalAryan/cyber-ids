@@ -1,28 +1,27 @@
-# Real-Time Network Threat & Anomaly Detection (BDA Project)
+# 🛡️ Real-Time Cyber Threat & Anomaly Detection (BDA)
 
-## Overview
-This project is a Big Data Analytics (BDA) pipeline designed for real-time network intrusion detection. It uses live packet capture (Scapy), feature extraction, and an unsupervised Machine Learning model (IsolationForest) trained on the CIC-IDS2017 dataset to detect anomalous network behavior and potential cyber threats.
+A complete Big Data Analytics pipeline for real-time network intrusion detection using machine learning. 
 
 ## Architecture
-1. **Data Source**: Live network traffic captured via Npcap/Scapy.
-2. **Feature Extraction**: Groups packets into 5-tuple flows and extracts 10 key numerical features (duration, bytes, packet sizes, etc.).
-3. **Machine Learning**: An IsolationForest model trained strictly on BENIGN traffic from the CIC-IDS2017 dataset. It detects anomalies based on mathematical deviations from normal traffic.
-4. **Visualization**: A Streamlit dashboard that reads the `alerts.csv` log in real-time to display metrics and charts.
+1. **Data Source:** Live packet capture via Scapy + Npcap.
+2. **Machine Learning:** 
+   - **Isolation Forest:** Unsupervised anomaly detection (Zero-Days).
+   - **Random Forest:** Supervised classification (DDoS, PortScan, etc.).
+   - **Heuristic Overrides:** Rule-based thresholds for high-volume attacks.
+3. **Dashboard:** Streamlit + Plotly for real-time SOC visualization.
 
-## Prerequisites
-- Windows OS with Npcap installed (WinPcap API-compatible mode).
-- Python 3.11+
-- CIC-IDS2017 CSVs placed in the `data/` folder.
-
-## Installation
-1. Install dependencies:
+## How to Run Locally
+1. Clone the repo and install dependencies:
    `pip install -r requirements.txt`
-2. Train the model on the CIC-IDS2017 dataset:
-   `python src\train.py`
-3. Start the Streamlit dashboard:
-   `python -m streamlit run src\dashboard.py`
-4. Open an Admin terminal and start the live capture:
-   `python src\detect.py "Wi-Fi"`
+2. Download the CIC-IDS2017 CSV dataset and place it in the `data/` folder.
+3. Train the models:
+   `python src/train.py`
+4. Start the dashboard:
+   `python -m streamlit run src/dashboard.py`
+5. Start the packet sniffer (Requires Admin privileges and Npcap):
+   `python src/detect.py "Wi-Fi"`
 
-## Results
-The system successfully detects traffic spikes and port scans in real-time, logging them to `alerts.csv` and visualizing them instantly on the dashboard.
+## Live Demo
+*Note: Cloud deployments cannot capture raw network packets due to provider restrictions. The Streamlit Cloud link showcases the UI, while the packet capture and ML inference are designed to run locally.*
+
+[Live Dashboard UI Link](YOUR_STREAMLIT_CLOUD_URL_HERE)
