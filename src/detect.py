@@ -56,32 +56,33 @@ def handle(pkt):
     
     preds = iso_model.predict(X_scaled)
     scores = iso_model.decision_function(X_scaled)
+    
+    # Random Forest prediction
     rf_preds = rf_model.predict(X)
     
     ts = time.strftime("%H:%M:%S")
     for r, p, s, rf_p in zip(ready, preds, scores, rf_preds):
         total_pkts = r["Total Fwd Packets"] + r["Total Backward Packets"]
         
-        # RAISED THRESHOLD: Normal web traffic sends ~10-15 packets. 
-        # A DDoS sends 100+. So we set the trigger to 50.
-        is_anomaly = (p == -1) or (total_pkts > 50) or (r["Flow Packets/s"] > 40)
+        # Let the ML model decide if it's an anomaly, OR if it's a massive flood (>100 packets)
+        is_anomaly = (p == -1) or (total_pkts > 100) or (r["Flow Packets/s"] > 50)
         
         if is_anomaly:
             alert_count += 1
-            attack_type = rf_p if rf_p.upper() != "BENIGN" else "Zero-Day / Unknown"
             
-            if attack_type == "Zero-Day / Unknown":
-                if r["Flow Packets/s"] > 40 or total_pkts > 50:
-                    attack_type = "DDoS / Flood"
-                elif total_pkts > 15 and r["Flow Duration"] < 500000:
-                    attack_type = "PortScan"
+            # Use the Random Forest prediction, but fallback to "Zero-Day" if it says BENIGN
+            attack_type = rf_p if str(rf_p).upper() != "BENIGN" else "Zero-Day / Unknown"
+            
+            # If ML says Zero-Day, check if it's a massive flood
+            if attack_type == "Zero-Day / Unknown" and total_pkts > 100:
+                attack_type = "DDoS / Flood"
             
             # Push to cloud
             push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
-            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type}")
+            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Packets: {total_pkts}")
             
-            # Add a tiny 0.1s delay so the Streamlit UI can render the spike smoothly
-            time.sleep(0.1)
+            # Add a tiny 0.2s delay so the Streamlit UI can render the spike smoothly one by one
+            time.sleep(0.2)
 
 if __name__ == "__main__":
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
