@@ -1,0 +1,12 @@
+# Ignore data and models (too large for GitHub)
+data/
+models/
+data_raw/
+
+# Ignore virtual environments and cache
+venv/
+__pycache__/
+*.pyc
+
+# Ignore alerts database (we don't want to commit live data)
+alerts.csv
