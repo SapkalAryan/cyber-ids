@@ -56,33 +56,28 @@ def handle(pkt):
     
     preds = iso_model.predict(X_scaled)
     scores = iso_model.decision_function(X_scaled)
-    
-    # Random Forest prediction
     rf_preds = rf_model.predict(X)
     
     ts = time.strftime("%H:%M:%S")
     for r, p, s, rf_p in zip(ready, preds, scores, rf_preds):
         total_pkts = r["Total Fwd Packets"] + r["Total Backward Packets"]
+        pkt_rate = r["Flow Packets/s"]
         
-        # Let the ML model decide if it's an anomaly, OR if it's a massive flood (>100 packets)
-        is_anomaly = (p == -1) or (total_pkts > 100) or (r["Flow Packets/s"] > 50)
+        # Anomaly if ML says so, OR if packet rate is INSANELY high (> 500 p/s)
+        is_anomaly = (p == -1) or (pkt_rate > 500)
         
         if is_anomaly:
             alert_count += 1
             
-            # Use the Random Forest prediction, but fallback to "Zero-Day" if it says BENIGN
-            attack_type = rf_p if str(rf_p).upper() != "BENIGN" else "Zero-Day / Unknown"
+            # Strict ML classification, fallback to heuristics
+            attack_type = str(rf_p) if str(rf_p).upper() != "BENIGN" else "Zero-Day / Unknown"
             
-            # If ML says Zero-Day, check if it's a massive flood
-            if attack_type == "Zero-Day / Unknown" and total_pkts > 100:
+            # If it's a massive rate, it's definitely a flood
+            if pkt_rate > 500:
                 attack_type = "DDoS / Flood"
-            
-            # Push to cloud
+                
             push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
-            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Packets: {total_pkts}")
-            
-            # Add a tiny 0.2s delay so the Streamlit UI can render the spike smoothly one by one
-            time.sleep(0.2)
+            print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Rate: {pkt_rate:.0f} p/s")
 
 if __name__ == "__main__":
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
