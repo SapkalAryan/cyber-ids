@@ -11,7 +11,7 @@ from features import FlowFeatureExtractor
 from schema import FEATURES
 
 # --- SUPABASE CONFIG ---
-SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
+SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.com"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBkbmZ5dHlkdnBiZHRna2J2eWNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIzMzU4MjgsImV4cCI6MjEwNzkxMTgyOH0.xp068vgZEu2bIJFng8Bg9UDjgfjUPnuGcDn3RKDzSDM"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
