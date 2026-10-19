@@ -2,9 +2,7 @@ import time
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from datetime import datetime
 from supabase import create_client, Client
-from scapy.all import IP, UDP, send
 
 # --- SUPABASE CONFIG ---
 SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
@@ -18,16 +16,8 @@ st.caption("Live ML Anomaly Detection Synced from Local Wi-Fi Sniffer")
 
 with st.sidebar:
     st.header("Red Team Controls")
-    st.write("1. To simulate a DDoS, click the button below.")
-    st.write("2. Ensure your local `detect.py` is running.")
-    
-    if st.button("🚨 LAUNCH DDoS ATTACK"):
-        try:
-            # Send 500 UDP packets to your router instantly
-            send(IP(dst="10.98.205.229")/UDP(dport=53), count=500, verbose=False)
-            st.success("Attack Sent! Watch the logs.")
-        except Exception as e:
-            st.error(f"Failed to send: {e}")
+    st.write("To simulate a massive DDoS attack, run this command in a **new** local terminal:")
+    st.code('python -c "from scapy.all import *; send(IP(dst=\\"10.98.205.229\\")/UDP(dport=53), count=1000, inter=0.001)"')
     
     if st.button("Clear Cloud Database"):
         supabase.table("alerts").delete().neq("id", 0).execute()
@@ -55,7 +45,8 @@ def render_live_data():
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Alerts per Minute")
-            alerts["datetime"] = pd.to_datetime(datetime.now().strftime("%Y-%m-%d ") + alerts["timestamp"].astype(str), errors="coerce")
+            # Parse the exact local timestamp sent by detect.py
+            alerts["datetime"] = pd.to_datetime(alerts["timestamp"], errors="coerce")
             counts = alerts.groupby(alerts["datetime"].dt.floor("min")).size().reset_index(name="count")
             fig = px.bar(counts, x="datetime", y="count", labels={"datetime": "Time", "count": "Alerts"})
             st.plotly_chart(fig, use_container_width=True)
