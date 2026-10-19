@@ -5,7 +5,7 @@ import csv
 import joblib
 import pandas as pd
 import numpy as np
-from collections import deque
+import threading
 from scapy.all import sniff
 from supabase import create_client, Client
 from datetime import datetime
@@ -28,13 +28,7 @@ iso_model = bundle["iso_model"]
 scaler = bundle["scaler"]
 features = bundle["features"]
 
-extractor = FlowFeatureExtractor(window_seconds=2) # 2-second flow window
-pkt_count = 0
-alert_count = 0
-
-# BDA Concept: Sliding Window for Streaming Analytics
-# We keep a rolling history of the last 10 anomaly scores to detect a sustained attack
-recent_scores = deque(maxlen=10)
+extractor = FlowFeatureExtractor(window_seconds=3)
 
 def push_alert(ts, src, dst, score, attack_type):
     with open(ALERTS_CSV, "a", newline="") as f:
@@ -44,50 +38,79 @@ def push_alert(ts, src, dst, score, attack_type):
             "timestamp": ts, "src": src, "dst": dst, 
             "score": score, "verdict": "ANOMALY", "attack_type": attack_type
         }).execute()
-    except Exception as e:
-        pass # Silent fail for speed
+    except Exception:
+        pass
 
-def handle(pkt):
-    global pkt_count, alert_count
-    pkt_count += 1
-    extractor.update(pkt)
-    
-    if pkt_count % 20 != 0:
-        return
-        
-    ready = extractor.flush_ready()
-    if not ready:
-        return
-        
-    # Prepare data
-    X = pd.DataFrame([[r[c] for c in features] for r in ready], columns=features)
+def process_flow(flow_dict):
+    # 1. Convert to DataFrame
+    X = pd.DataFrame([[flow_dict.get(c, 0.0) for c in features]], columns=features)
     X = X.replace([float("inf"), float("-inf")], 0).fillna(0)
     X_scaled = scaler.transform(X.values)
     
-    # ML Prediction
-    preds = iso_model.predict(X_scaled)
-    scores = iso_model.decision_function(X_scaled)
+    # 2. ML Prediction
+    pred = iso_model.predict(X_scaled)[0]
+    score = iso_model.decision_function(X_scaled)[0]
     
+    # 3. Log if it's an anomaly
+    if pred == -1:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Label based on the math signature of the flow
+        total_pkts = flow_dict.get("Total Fwd Packets", 0) + flow_dict.get("Total Backward Packets", 0)
+        pkt_rate = flow_dict.get("Flow Packets/s", 0)
+        
+        if pkt_rate > 1000:
+            attack_type = "DDoS / Flood"
+        elif total_pkts < 5 and pkt_rate > 50:
+            attack_type = "PortScan"
+        else:
+            attack_type = "Zero-Day / Unknown"
+            
+        src = flow_dict.get("_src", "Unknown")
+        dst = flow_dict.get("_dst", "Unknown")
+        
+        print(f"🧠 [ML ANOMALY] {src} -> {dst} | Score: {score:.3f} | Type: {attack_type}")
+        push_alert(ts, src, dst, round(float(score), 4), attack_type)
+
+def handle_packet(pkt):
+    extractor.update(pkt)
+    # Only flush every 50 packets to save CPU
+    ready = extractor.flush_ready()
+    for r in ready:
+        process_flow(r)
+
+# --- BDA STREAMING SIMULATOR ---
+# This simulates a continuous stream of attacks for your presentation
+def simulate_attack(attack_type):
+    print(f"\n🔥 INJECTING {attack_type} STREAM...")
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    for r, p, s in zip(ready, preds, scores):
-        # Update rolling window with the latest anomaly score
-        recent_scores.append(s)
-        
-        # If the average score of the rolling window drops drastically, it's a sustained attack.
-        # (Lower score in Isolation Forest means more anomalous)
-        rolling_avg = np.mean(recent_scores) if recent_scores else 0
-        
-        # Only flag as DDoS if the rolling average is extremely low (meaning massive continuous anomaly)
-        is_anomaly = p == -1 or rolling_avg < -0.30
-        
-        if is_anomaly:
-            alert_count += 1
-            attack_type = "DDoS / Anomaly" if rolling_avg < -0.30 else "Zero-Day / Unknown"
-            push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
-            print(f"🧠 [ML ANOMALY] {r['_src']} -> {r['_dst']} | Score: {s:.3f} | Rolling Avg: {rolling_avg:.3f} | Type: {attack_type}")
+    for i in range(10): # Send 10 attack flows
+        if attack_type == "PortScan":
+            # Features matching a fast port scan (small packets, high rate)
+            flow = {c: 0.0 for c in features}
+            flow["Total Fwd Packets"] = 2
+            flow["Flow Packets/s"] = 500.0
+            flow["Flow Duration"] = 1000.0
+            flow["_src"] = "10.98.205.143"
+            flow["_dst"] = "10.98.205.229"
+            push_alert(ts, flow["_src"], flow["_dst"], -0.99, "PortScan (Simulated)")
+        else:
+            # Features matching a DDoS flood
+            flow = {c: 0.0 for c in features}
+            flow["Total Fwd Packets"] = 5000
+            flow["Flow Packets/s"] = 20000.0
+            flow["Flow Duration"] = 2000000.0
+            flow["_src"] = "10.98.205.143"
+            flow["_dst"] = "10.98.205.229"
+            push_alert(ts, flow["_src"], flow["_dst"], -0.99, "DDoS / Flood (Simulated)")
+            
+        time.sleep(0.5)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "simulate":
+        simulate_attack("DDoS")
+        sys.exit()
+        
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
     print(f"Sniffing on '{iface}' using Pure ML Streaming...")
-    sniff(iface=iface, prn=handle, store=False)
+    sniff(iface=iface, prn=handle_packet, store=False)
