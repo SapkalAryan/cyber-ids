@@ -10,7 +10,15 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="SOC Threat Monitor", layout="wide")
+st.set_page_config(
+    page_title="SOC Threat Monitor", 
+    layout="wide",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': "BDA Cyber Threat Detection System"
+    }
+)
 st.title("SOC Threat Monitor (Cloud)")
 st.caption("Live ML Anomaly Detection Synced from Local Wi-Fi Sniffer")
 

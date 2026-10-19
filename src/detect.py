@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import csv
 import joblib
 import pandas as pd
 import numpy as np
@@ -21,7 +20,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE, "models", "ids_iso.joblib")
-ALERTS_CSV = os.path.join(BASE, "alerts.csv")
 
 bundle = joblib.load(MODEL_PATH)
 iso_model = bundle["iso_model"]
@@ -31,8 +29,7 @@ features = bundle["features"]
 extractor = FlowFeatureExtractor(window_seconds=3)
 
 def push_alert(ts, src, dst, score, attack_type):
-    with open(ALERTS_CSV, "a", newline="") as f:
-        csv.writer(f).writerow([ts, src, dst, score, "ANOMALY", attack_type])
+    # Removed local CSV writing. We only push to the cloud.
     try:
         supabase.table("alerts").insert({
             "timestamp": ts, "src": src, "dst": dst, 
