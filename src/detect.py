@@ -63,21 +63,20 @@ def handle(pkt):
         total_pkts = r["Total Fwd Packets"] + r["Total Backward Packets"]
         pkt_rate = r["Flow Packets/s"]
         
-        # Detect if it's an anomaly (either ML says so, or it's a huge volume)
-        is_anomaly = (p == -1) or (total_pkts > 20) or (pkt_rate > 50)
+        # RAISED THRESHOLD: Must be > 150 packets or 200 packets/sec to trigger heuristic
+        is_anomaly = (p == -1) or (total_pkts > 150) or (pkt_rate > 200)
         
         if is_anomaly:
             alert_count += 1
             
-            # ML Classification
             attack_type = str(rf_p) if str(rf_p).upper() != "BENIGN" else "Zero-Day / Unknown"
             
-            # Heuristic override for massive floods
-            if total_pkts > 20 or pkt_rate > 50:
+            if total_pkts > 150 or pkt_rate > 200:
                 attack_type = "DDoS / Flood"
                 
             push_alert(ts, r["_src"], r["_dst"], round(float(s), 4), attack_type)
             print(f"☁️ [SYNCED] {r['_src']} -> {r['_dst']} | Type: {attack_type} | Pkts: {total_pkts}")
+
 if __name__ == "__main__":
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
     print(f"Sniffing on '{iface}' and syncing to Cloud...")

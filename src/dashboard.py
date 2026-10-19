@@ -4,6 +4,7 @@ import streamlit as st
 import plotly.express as px
 from datetime import datetime
 from supabase import create_client, Client
+from scapy.all import IP, UDP, send
 
 # --- SUPABASE CONFIG ---
 SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
@@ -17,14 +18,21 @@ st.caption("Live ML Anomaly Detection Synced from Local Wi-Fi Sniffer")
 
 with st.sidebar:
     st.header("Red Team Controls")
-    st.write("Run this in your local command prompt to simulate a TCP DDoS:")
-    st.code('python -c "from scapy.all import *; send(IP(dst=\\"10.98.205.229\\")/TCP(dport=80, flags=\\"S\\"), count=200, inter=0.01)"')
+    st.write("1. To simulate a DDoS, click the button below.")
+    st.write("2. Ensure your local `detect.py` is running.")
+    
+    if st.button("🚨 LAUNCH DDoS ATTACK"):
+        try:
+            # Send 500 UDP packets to your router instantly
+            send(IP(dst="10.98.205.229")/UDP(dport=53), count=500, verbose=False)
+            st.success("Attack Sent! Watch the logs.")
+        except Exception as e:
+            st.error(f"Failed to send: {e}")
     
     if st.button("Clear Cloud Database"):
         supabase.table("alerts").delete().neq("id", 0).execute()
         st.success("Database cleared!")
 
-# The fragment ensures only this section updates, stopping the flickering
 @st.fragment(run_every="2s")
 def render_live_data():
     try:
@@ -64,5 +72,4 @@ def render_live_data():
     else:
         st.info("Waiting for local sniffer to send data to the cloud...")
 
-# Render the fragment
 render_live_data()
