@@ -20,6 +20,10 @@ st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analyt
 # Helper function for Offline Reverse DNS & Organization mapping
 @st.cache_data(ttl=3600)
 def get_domain_name(ip):
+    # Check if it's a local IP first using strict Regex
+    if re.match(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip) or re.match(r"^192\.168\.\d{1,3}\.\d{1,3}$", ip):
+        return "Local Network"
+        
     try:
         # Attempt to resolve the IP to a domain name
         return socket.gethostbyaddr(ip)[0]
@@ -29,13 +33,10 @@ def get_domain_name(ip):
             return "Google Services"
         elif ip.startswith("20.") or ip.startswith("52.") or ip.startswith("13.107."):
             return "Microsoft / Azure"
-        elif ip.startswith("104.") or ip.startswith("185.") or ip.startswith("34."):
-            return "Cloudflare / Akamai"
+        elif ip.startswith("104.") or ip.startswith("185.") or ip.startswith("34.") or ip.startswith("18.66."):
+            return "Cloudflare / Akamai / AWS"
         elif ip.startswith("140.82."):
             return "GitHub Services"
-        # Strict Regex for Local IPs (192.168.x.x and 10.x.x.x)
-        elif re.match(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip) or re.match(r"^192\.168\.\d{1,3}\.\d{1,3}$", ip):
-            return "Local Network"
         else:
             return "Unknown External Server"
 
@@ -52,6 +53,9 @@ with tab1:
             supabase.table("alerts").delete().neq("id", 0).execute()
             st.success("Database cleared!")
 
+    # We use a single empty placeholder to update the whole UI without flickering
+    dashboard_placeholder = st.empty()
+
     @st.fragment(run_every="2s")
     def render_live_data():
         try:
@@ -61,55 +65,56 @@ with tab1:
             st.error(f"Database error: {e}")
             return
 
-        if not alerts.empty:
-            alerts = alerts.iloc[::-1]
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Alerts", len(alerts))
-            c2.metric("Unique Sources", alerts["src"].nunique())
-            
-            top_port = "N/A"
-            if "dst_port" in alerts.columns and not alerts["dst_port"].dropna().empty:
-                valid_ports = alerts[alerts["dst_port"] > 0]["dst_port"]
-                top_port = valid_ports.mode()[0] if not valid_ports.empty else "0 (ICMP/Other)"
-            c3.metric("Top Target Port", top_port)
-            
-            top_attack = "None"
-            if "attack_type" in alerts.columns and not alerts["attack_type"].dropna().empty:
-                top_attack = alerts["attack_type"].mode()[0]
-            c4.metric("Top Threat", top_attack)
+        with dashboard_placeholder.container():
+            if not alerts.empty:
+                alerts = alerts.iloc[::-1]
+                
+                # Metrics are now INSIDE the auto-refresh block
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Alerts", len(alerts))
+                c2.metric("Unique Sources", alerts["src"].nunique())
+                
+                top_port = "N/A"
+                if "dst_port" in alerts.columns and not alerts["dst_port"].dropna().empty:
+                    valid_ports = alerts[alerts["dst_port"] > 0]["dst_port"]
+                    top_port = valid_ports.mode()[0] if not valid_ports.empty else "0 (ICMP/Other)"
+                c3.metric("Top Target Port", top_port)
+                
+                top_attack = "None"
+                if "attack_type" in alerts.columns and not alerts["attack_type"].dropna().empty:
+                    top_attack = alerts["attack_type"].mode()[0]
+                c4.metric("Top Threat", top_attack)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Alerts per Minute")
-                alerts["datetime"] = pd.to_datetime(alerts["timestamp"], errors="coerce")
-                counts = alerts.groupby(alerts["datetime"].dt.floor("min")).size().reset_index(name="count")
-                fig = px.bar(counts, x="datetime", y="count", labels={"datetime": "Time", "count": "Alerts"})
-                st.plotly_chart(fig, use_container_width=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Alerts per Minute")
+                    alerts["datetime"] = pd.to_datetime(alerts["timestamp"], errors="coerce")
+                    counts = alerts.groupby(alerts["datetime"].dt.floor("min")).size().reset_index(name="count")
+                    fig = px.bar(counts, x="datetime", y="count", labels={"datetime": "Time", "count": "Alerts"})
+                    st.plotly_chart(fig, use_container_width=True)
 
-            with col2:
-                st.subheader("Protocol Distribution")
-                if "protocol" in alerts.columns and not alerts["protocol"].dropna().empty:
-                    proto_counts = alerts["protocol"].value_counts().reset_index()
-                    proto_counts.columns = ["Protocol", "Count"]
-                    fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.4)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.info("Protocol data not yet available.")
+                with col2:
+                    st.subheader("Protocol Distribution")
+                    if "protocol" in alerts.columns and not alerts["protocol"].dropna().empty:
+                        proto_counts = alerts["protocol"].value_counts().reset_index()
+                        proto_counts.columns = ["Protocol", "Count"]
+                        fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.4)
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                    else:
+                        st.info("Protocol data not yet available.")
 
-            st.subheader("Recent Threat Log")
-            display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
-            available_cols = [c for c in display_cols if c in alerts.columns]
-            
-            # Add Offline Reverse DNS & Organization Mapping
-            display_df = alerts[available_cols].iloc[::-1].copy()
-            if "dst" in display_df.columns:
-                display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
-                display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
+                st.subheader("Recent Threat Log")
+                display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
+                available_cols = [c for c in display_cols if c in alerts.columns]
+                
+                display_df = alerts[available_cols].iloc[::-1].copy()
+                if "dst" in display_df.columns:
+                    display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
+                    display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
 
-            st.dataframe(display_df, use_container_width=True)
-        else:
-            st.info("Waiting for local sniffer to send data to the cloud...")
+                st.dataframe(display_df, use_container_width=True)
+            else:
+                st.info("Waiting for local sniffer to send data to the cloud...")
 
     render_live_data()
 
