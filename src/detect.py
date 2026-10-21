@@ -28,31 +28,42 @@ features = bundle["features"]
 
 extractor = FlowFeatureExtractor(window_seconds=3)
 
-def push_alert(ts, src, dst, score, attack_type):
-    # Removed local CSV writing. We only push to the cloud.
-    try:
-        supabase.table("alerts").insert({
-            "timestamp": ts, "src": src, "dst": dst, 
-            "score": score, "verdict": "ANOMALY", "attack_type": attack_type
-        }).execute()
-    except Exception:
-        pass
+# --- BDA BATCHING LOGIC ---
+alert_buffer = []
+buffer_lock = threading.Lock()
+
+def flush_buffer():
+    global alert_buffer
+    while True:
+        time.sleep(5) # Wait 5 seconds to batch data
+        with buffer_lock:
+            if alert_buffer:
+                try:
+                    # Bulk Insert to Supabase
+                    supabase.table("alerts").insert(alert_buffer).execute()
+                    print(f"📦 [BATCH INSERTED] {len(alert_buffer)} alerts to Supabase.")
+                    alert_buffer = []
+                except Exception as e:
+                    print(f"DB Error: {e}")
+
+def push_alert(ts, src, dst, score, attack_type, proto="Unknown", dport=0):
+    with buffer_lock:
+        alert_buffer.append({
+            "timestamp": ts, "src": src, "dst": dst, "score": score,
+            "verdict": "ANOMALY", "attack_type": attack_type,
+            "protocol": proto, "dst_port": dport
+        })
 
 def process_flow(flow_dict):
-    # 1. Convert to DataFrame
     X = pd.DataFrame([[flow_dict.get(c, 0.0) for c in features]], columns=features)
     X = X.replace([float("inf"), float("-inf")], 0).fillna(0)
     X_scaled = scaler.transform(X.values)
     
-    # 2. ML Prediction
     pred = iso_model.predict(X_scaled)[0]
     score = iso_model.decision_function(X_scaled)[0]
     
-    # 3. Log if it's an anomaly
     if pred == -1:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Label based on the math signature of the flow
         total_pkts = flow_dict.get("Total Fwd Packets", 0) + flow_dict.get("Total Backward Packets", 0)
         pkt_rate = flow_dict.get("Flow Packets/s", 0)
         
@@ -65,49 +76,37 @@ def process_flow(flow_dict):
             
         src = flow_dict.get("_src", "Unknown")
         dst = flow_dict.get("_dst", "Unknown")
+        proto = flow_dict.get("_proto", "Unknown")
+        dport = flow_dict.get("_dport", 0)
         
-        print(f"🧠 [ML ANOMALY] {src} -> {dst} | Score: {score:.3f} | Type: {attack_type}")
-        push_alert(ts, src, dst, round(float(score), 4), attack_type)
+        print(f"🧠 [ML ANOMALY] {src} -> {dst} | Type: {attack_type} | Proto: {proto}")
+        push_alert(ts, src, dst, round(float(score), 4), attack_type, proto, dport)
 
 def handle_packet(pkt):
     extractor.update(pkt)
-    # Only flush every 50 packets to save CPU
     ready = extractor.flush_ready()
     for r in ready:
         process_flow(r)
 
-# --- BDA STREAMING SIMULATOR ---
-# This simulates a continuous stream of attacks for your presentation
 def simulate_attack(attack_type):
     print(f"\n🔥 INJECTING {attack_type} STREAM...")
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for i in range(10): # Send 10 attack flows
+    for i in range(10): 
         if attack_type == "PortScan":
-            # Features matching a fast port scan (small packets, high rate)
-            flow = {c: 0.0 for c in features}
-            flow["Total Fwd Packets"] = 2
-            flow["Flow Packets/s"] = 500.0
-            flow["Flow Duration"] = 1000.0
-            flow["_src"] = "10.98.205.143"
-            flow["_dst"] = "10.98.205.229"
-            push_alert(ts, flow["_src"], flow["_dst"], -0.99, "PortScan (Simulated)")
+            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "PortScan (Simulated)", "TCP", 80)
         else:
-            # Features matching a DDoS flood
-            flow = {c: 0.0 for c in features}
-            flow["Total Fwd Packets"] = 5000
-            flow["Flow Packets/s"] = 20000.0
-            flow["Flow Duration"] = 2000000.0
-            flow["_src"] = "10.98.205.143"
-            flow["_dst"] = "10.98.205.229"
-            push_alert(ts, flow["_src"], flow["_dst"], -0.99, "DDoS / Flood (Simulated)")
-            
+            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53)
         time.sleep(0.5)
+    time.sleep(6) # Wait for the buffer to flush before exiting
 
 if __name__ == "__main__":
+    # Start the background batching thread
+    threading.Thread(target=flush_buffer, daemon=True).start()
+
     if len(sys.argv) > 1 and sys.argv[1] == "simulate":
         simulate_attack("DDoS")
         sys.exit()
         
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
-    print(f"Sniffing on '{iface}' using Pure ML Streaming...")
+    print(f"Sniffing on '{iface}' using BDA Micro-Batching...")
     sniff(iface=iface, prn=handle_packet, store=False)
