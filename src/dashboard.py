@@ -21,9 +21,11 @@ st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analyt
 @st.cache_data(ttl=3600)
 def get_domain_name(ip):
     try:
+        # Attempt to resolve the IP to a domain name
         return socket.gethostbyaddr(ip)[0]
     except:
-        return ip
+        # If it fails, return "Unknown Domain" instead of the raw IP
+        return "Unknown Domain"
 
 # Create three tabs
 tab1, tab2, tab3 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner", "🔗 URL Reputation Scanner"])
@@ -188,9 +190,9 @@ with tab3:
                 if found_kws:
                     flags.append(f"Contains sensitive keywords: {', '.join(found_kws)}")
                 
-                # 5. Check for URL shorteners
+                # 5. Check for URL shorteners (Strict check: must be the exact domain)
                 shorteners = ["bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly"]
-                if any(short in domain for short in shorteners):
+                if domain in shorteners:
                     flags.append("Uses a URL shortener (Hides true destination)")
                 
                 # 6. Check for excessive hyphens
