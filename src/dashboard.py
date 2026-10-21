@@ -139,7 +139,11 @@ with tab1:
                     use_container_width=True,
                     column_config={
                         "score": st.column_config.ProgressColumn(
-                            "Anomaly Score", format="%.4f", min_value=-1.0, max_value=0.0,
+                            "Anomaly Score", 
+                            format="%.4f", 
+                            min_value=0.0,  # 0 is the minimum (Empty bar)
+                            max_value=-1.0, # -1 is the maximum (Full bar)
+                            color="#FF4B4B" # Bright Red
                         )
                     }
                 )
