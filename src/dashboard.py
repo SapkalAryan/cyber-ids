@@ -25,7 +25,7 @@ def get_domain_name(ip):
         return socket.gethostbyaddr(ip)[0]
     except:
         # If DNS fails, map known IP prefixes to Organizations
-        if ip.startswith("142.") or ip.startswith("172.217.") or ip.startswith("74.125.") or ip.startswith("172.217"):
+        if ip.startswith("142.") or ip.startswith("172.217.") or ip.startswith("74.125."):
             return "Google Services"
         elif ip.startswith("20.") or ip.startswith("52.") or ip.startswith("13.107."):
             return "Microsoft / Azure"
@@ -33,7 +33,8 @@ def get_domain_name(ip):
             return "Cloudflare / Akamai"
         elif ip.startswith("140.82."):
             return "GitHub Services"
-        elif ip.startswith("10.") or ip.startswith("192.168."):
+        # Strict Regex for Local IPs (192.168.x.x and 10.x.x.x)
+        elif re.match(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip) or re.match(r"^192\.168\.\d{1,3}\.\d{1,3}$", ip):
             return "Local Network"
         else:
             return "Unknown External Server"
