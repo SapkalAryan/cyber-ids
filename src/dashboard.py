@@ -27,7 +27,7 @@ st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analyt
 tab1, tab2 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner"])
 
 # ==========================================
-# TAB 1: YOUR ORIGINAL DASHBOARD
+# TAB 1: LIVE NETWORK DASHBOARD
 # ==========================================
 with tab1:
     with st.sidebar:
@@ -53,10 +53,16 @@ with tab1:
             c1.metric("Total Alerts", len(alerts))
             c2.metric("Unique Sources", alerts["src"].nunique())
             
-            top_port = alerts["dst_port"].mode()[0] if "dst_port" in alerts.columns and not alerts["dst_port"].empty else "N/A"
+            # Safely handle empty columns for Top Port
+            top_port = "N/A"
+            if "dst_port" in alerts.columns and not alerts["dst_port"].dropna().empty:
+                top_port = alerts["dst_port"].mode()[0]
             c3.metric("Top Target Port", top_port)
             
-            top_attack = alerts["attack_type"].mode()[0] if not alerts["attack_type"].empty else "None"
+            # Safely handle empty columns for Top Threat
+            top_attack = "None"
+            if "attack_type" in alerts.columns and not alerts["attack_type"].dropna().empty:
+                top_attack = alerts["attack_type"].mode()[0]
             c4.metric("Top Threat", top_attack)
 
             col1, col2 = st.columns(2)
@@ -69,13 +75,13 @@ with tab1:
 
             with col2:
                 st.subheader("Protocol Distribution")
-                if "protocol" in alerts.columns:
+                if "protocol" in alerts.columns and not alerts["protocol"].dropna().empty:
                     proto_counts = alerts["protocol"].value_counts().reset_index()
                     proto_counts.columns = ["Protocol", "Count"]
                     fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.4)
                     st.plotly_chart(fig_pie, use_container_width=True)
                 else:
-                    st.info("Protocol data not yet available.")
+                    st.info("Protocol data not yet available. Waiting for new network packets...")
 
             st.subheader("Recent Threat Log")
             display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
@@ -87,7 +93,7 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: NEW FILE & EMAIL SCANNER
+# TAB 2: FILE & EMAIL SCANNER
 # ==========================================
 with tab2:
     st.header("Upload Suspicious File or Email")
