@@ -3,6 +3,8 @@ import streamlit as st
 import plotly.express as px
 from supabase import create_client, Client
 import re
+import socket
+from urllib.parse import urlparse
 
 # --- SUPABASE CONFIG ---
 SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
@@ -10,29 +12,28 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(
-    page_title="SOC Threat Monitor", 
-    layout="wide",
-    menu_items={
-        'Get Help': None,
-        'Report a bug': None,
-        'About': "BDA Cyber Threat Detection System"
-    }
-)
+st.set_page_config(page_title="SOC Threat Monitor", layout="wide", menu_items={'Get Help': None, 'Report a bug': None, 'About': "BDA Cyber Threat Detection System"})
 
 st.title("🛡️ Enterprise SOC & Threat Analytics")
 st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analytics")
 
-# Create two tabs
-tab1, tab2 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner"])
+# Helper function for Offline Reverse DNS
+@st.cache_data(ttl=3600)
+def get_domain_name(ip):
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except:
+        return ip
+
+# Create three tabs
+tab1, tab2, tab3 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner", "🔗 URL Reputation Scanner"])
 
 # ==========================================
-# TAB 1: LIVE NETWORK DASHBOARD
+# TAB 1: LIVE NETWORK TRAFFIC
 # ==========================================
 with tab1:
     with st.sidebar:
         st.header("Database Admin")
-        st.write("Clear the current threat logs from the cloud database.")
         if st.button("Clear Cloud Database", use_container_width=True):
             supabase.table("alerts").delete().neq("id", 0).execute()
             st.success("Database cleared!")
@@ -53,13 +54,12 @@ with tab1:
             c1.metric("Total Alerts", len(alerts))
             c2.metric("Unique Sources", alerts["src"].nunique())
             
-            # Safely handle empty columns for Top Port
             top_port = "N/A"
             if "dst_port" in alerts.columns and not alerts["dst_port"].dropna().empty:
-                top_port = alerts["dst_port"].mode()[0]
+                valid_ports = alerts[alerts["dst_port"] > 0]["dst_port"]
+                top_port = valid_ports.mode()[0] if not valid_ports.empty else "0 (ICMP/Other)"
             c3.metric("Top Target Port", top_port)
             
-            # Safely handle empty columns for Top Threat
             top_attack = "None"
             if "attack_type" in alerts.columns and not alerts["attack_type"].dropna().empty:
                 top_attack = alerts["attack_type"].mode()[0]
@@ -81,12 +81,19 @@ with tab1:
                     fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.4)
                     st.plotly_chart(fig_pie, use_container_width=True)
                 else:
-                    st.info("Protocol data not yet available. Waiting for new network packets...")
+                    st.info("Protocol data not yet available.")
 
             st.subheader("Recent Threat Log")
             display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
             available_cols = [c for c in display_cols if c in alerts.columns]
-            st.dataframe(alerts[available_cols].iloc[::-1], use_container_width=True)
+            
+            # Add Offline Reverse DNS to Destination IPs
+            display_df = alerts[available_cols].iloc[::-1].copy()
+            if "dst" in display_df.columns:
+                display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
+                display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
+
+            st.dataframe(display_df, use_container_width=True)
         else:
             st.info("Waiting for local sniffer to send data to the cloud...")
 
@@ -97,8 +104,6 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("Upload Suspicious File or Email")
-    st.write("Upload a `.txt` or `.eml` file. The system will scan it for malicious URLs, suspicious IPs, and phishing keywords.")
-    
     uploaded_file = st.file_uploader("Choose a file", type=["txt", "eml"])
     
     if uploaded_file is not None:
@@ -125,25 +130,92 @@ with tab2:
                 m3.metric("IPs Found", len(found_ips))
                 m4.metric("Phishing Keywords", len(found_keywords))
                 
-                if risk_score > 50:
-                    st.error("🚨 HIGH RISK: This file contains multiple indicators of a phishing attack or malware.")
-                elif risk_score > 20:
-                    st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected. Proceed with caution.")
-                else:
-                    st.success("✅ LOW RISK: No obvious threats detected.")
+                if risk_score > 50: st.error("🚨 HIGH RISK: Phishing indicators found.")
+                elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
+                else: st.success("✅ LOW RISK: No obvious threats detected.")
                 
                 if found_urls or found_ips or found_keywords:
                     st.write("### Extracted Threats")
-                    chart_data = pd.DataFrame({
-                        "Threat Type": ["URLs", "IP Addresses", "Keywords"],
-                        "Count": [len(found_urls), len(found_ips), len(found_keywords)]
-                    })
-                    fig = px.bar(chart_data, x="Threat Type", y="Count", color="Threat Type", title="Threat Composition")
+                    chart_data = pd.DataFrame({"Threat Type": ["URLs", "IPs", "Keywords"], "Count": [len(found_urls), len(found_ips), len(found_keywords)]})
+                    chart_data = chart_data[chart_data["Count"] > 0]
+                    fig = px.bar(chart_data, x="Threat Type", y="Count", color="Threat Type")
                     st.plotly_chart(fig, use_container_width=True)
-
                     if found_urls:
                         st.write("**Malicious URLs:**")
                         for u in found_urls: st.code(u)
-                    if found_ips:
-                        st.write("**Suspicious IP Addresses:**")
-                        for ip in found_ips: st.code(ip)
+
+# ==========================================
+# TAB 3: OFFLINE URL REPUTATION SCANNER
+# ==========================================
+with tab3:
+    st.header("URL Lexical Threat Scanner")
+    st.write("Scan a URL locally using heuristic analysis to detect phishing, typosquatting, and malicious patterns without relying on external APIs.")
+    
+    url_to_scan = st.text_input("Enter a URL to scan (e.g., http://paypal-secure-login.com):")
+    
+    if st.button("🌐 Scan URL", use_container_width=True):
+        if not url_to_scan:
+            st.warning("Please enter a URL.")
+        else:
+            with st.spinner("Running lexical analysis..."):
+                # Add http:// if missing for parsing
+                if not url_to_scan.startswith("http"):
+                    url_to_scan = "http://" + url_to_scan
+                    
+                parsed = urlparse(url_to_scan)
+                domain = parsed.netloc.lower()
+                path = parsed.path.lower()
+                
+                # --- HEURISTIC RULES ---
+                flags = []
+                
+                # 1. Check for IP address instead of domain
+                if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain):
+                    flags.append("Uses a raw IP address (suspicious)")
+                
+                # 2. Check for suspicious TLDs
+                bad_tlds = [".xyz", ".top", ".club", ".work", ".click", ".link"]
+                if any(domain.endswith(tld) for tld in bad_tlds):
+                    flags.append("Uses a high-risk Top Level Domain (TLD)")
+                
+                # 3. Check for too many subdomains (e.g., login.secure.paypal.com.update.com)
+                if domain.count(".") > 3:
+                    flags.append("Excessive subdomains (Typosquatting/Phishing)")
+                
+                # 4. Check for sensitive keywords in domain or path
+                keywords = ["login", "secure", "account", "update", "verify", "bank", "signin", "password"]
+                found_kws = [kw for kw in keywords if kw in domain or kw in path]
+                if found_kws:
+                    flags.append(f"Contains sensitive keywords: {', '.join(found_kws)}")
+                
+                # 5. Check for URL shorteners
+                shorteners = ["bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly"]
+                if any(short in domain for short in shorteners):
+                    flags.append("Uses a URL shortener (Hides true destination)")
+                
+                # 6. Check for excessive hyphens
+                if domain.count("-") > 2:
+                    flags.append("Excessive hyphens in domain name")
+                
+                # --- CALCULATE RISK ---
+                risk_score = len(flags) * 20
+                risk_score = min(risk_score, 100)
+                
+                st.subheader("Scan Results")
+                c1, c2 = st.columns(2)
+                c1.metric("Target Domain", domain)
+                c2.metric("Risk Score", f"{risk_score}/100")
+                
+                if risk_score >= 60:
+                    st.error("🚨 HIGH RISK: This URL exhibits multiple characteristics of a phishing scam.")
+                elif risk_score >= 20:
+                    st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
+                else:
+                    st.success("✅ LOW RISK: No obvious lexical threats detected.")
+                
+                if flags:
+                    st.write("### Detection Flags")
+                    for flag in flags:
+                        st.write(f"- ⚠️ {flag}")
+                else:
+                    st.write("No malicious patterns found in the URL string.")
