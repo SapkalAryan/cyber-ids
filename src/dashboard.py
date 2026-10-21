@@ -13,18 +13,23 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- PAGE CONFIG & CUSTOM CSS ---
 st.set_page_config(page_title="SOC Threat Monitor", layout="wide", menu_items={'Get Help': None, 'Report a bug': None, 'About': "BDA Cyber Threat Detection System"})
 
+# Determine current theme to style charts correctly
+is_dark = st.context.theme.type == "dark"
+text_color = "white" if is_dark else "black"
+
+# Minimal, theme-aware CSS
 st.markdown("""
     <style>
-    /* Custom CSS for a sleek SOC look */
-    .stApp { background-color: #0E1117; }
-    h1, h2, h3 { color: #00FFAA !important; font-family: 'Courier New', monospace; }
-    .stMetric { background-color: #1E232F; padding: 15px; border-radius: 10px; border-left: 5px solid #00FFAA; }
-    .css-1wivap2 { background-color: #1E232F; }
-    div[data-testid="stDataFrame"] { background-color: #1E232F; border-radius: 10px; }
-    .st-emotion-cache-1gulkj5 { color: #FFFFFF; }
+    h1, h2, h3 { font-family: 'Courier New', monospace; }
+    /* This safely styles the metric boxes without breaking the background */
+    [data-testid="stMetric"] { 
+        background-color: rgba(128, 128, 128, 0.1); 
+        padding: 15px; 
+        border-radius: 10px; 
+        border-left: 5px solid #00FFAA; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -45,14 +50,12 @@ def get_domain_name(ip):
         elif ip.startswith("140.82."): return "GitHub Services"
         else: return "Unknown External Server"
 
-# Create three tabs
 tab1, tab2, tab3 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner", "🔗 URL Reputation Scanner"])
 
 # ==========================================
-# TAB 1: LIVE NETWORK TRAFFIC (The Revamped UI)
+# TAB 1: LIVE NETWORK TRAFFIC
 # ==========================================
 with tab1:
-    # Placeholder for auto-refreshing content
     dashboard_placeholder = st.empty()
 
     @st.fragment(run_every="2s")
@@ -68,7 +71,6 @@ with tab1:
             if not alerts.empty:
                 alerts = alerts.iloc[::-1]
                 
-                # --- SIDEBAR METRICS ---
                 with st.sidebar:
                     st.markdown("### 🟢 System Status: **ACTIVE**")
                     st.divider()
@@ -86,7 +88,6 @@ with tab1:
                         st.success("Database cleared!")
                         st.rerun()
 
-                # --- MAIN CHARTS ---
                 col1, col2 = st.columns((2, 1))
                 
                 with col1:
@@ -103,8 +104,9 @@ with tab1:
                     )])
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='white'), margin=dict(l=0, r=0, t=10, b=0),
-                        xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
+                        font=dict(color=text_color), margin=dict(l=0, r=0, t=10, b=0),
+                        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'), 
+                        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -117,13 +119,12 @@ with tab1:
                                          color_discrete_sequence=px.colors.sequential.Teal)
                         fig_pie.update_layout(
                             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color='white'), margin=dict(l=0, r=0, t=10, b=0)
+                            font=dict(color=text_color), margin=dict(l=0, r=0, t=10, b=0)
                         )
                         st.plotly_chart(fig_pie, use_container_width=True)
                     else:
                         st.info("Waiting for protocol data...")
 
-                # --- RECENT THREAT LOG TABLE ---
                 st.subheader("📋 Recent Threat Log")
                 display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
@@ -133,7 +134,6 @@ with tab1:
                     display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
                     display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
 
-                # Style the dataframe
                 st.dataframe(
                     display_df, 
                     use_container_width=True,
@@ -190,7 +190,10 @@ with tab2:
                     chart_data = pd.DataFrame({"Threat Type": ["URLs", "IPs", "Keywords"], "Count": [len(found_urls), len(found_ips), len(found_keywords)]})
                     chart_data = chart_data[chart_data["Count"] > 0]
                     fig = px.bar(chart_data, x="Threat Type", y="Count", color="Threat Type", color_discrete_sequence=px.colors.sequential.Reds_r)
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', 
+                        font=dict(color=text_color)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                     if found_urls:
                         st.write("**Malicious URLs:**")
