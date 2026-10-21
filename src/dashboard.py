@@ -17,15 +17,26 @@ st.set_page_config(page_title="SOC Threat Monitor", layout="wide", menu_items={'
 st.title("🛡️ Enterprise SOC & Threat Analytics")
 st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analytics")
 
-# Helper function for Offline Reverse DNS
+# Helper function for Offline Reverse DNS & Organization mapping
 @st.cache_data(ttl=3600)
 def get_domain_name(ip):
     try:
         # Attempt to resolve the IP to a domain name
         return socket.gethostbyaddr(ip)[0]
     except:
-        # If it fails, return "Unknown Domain" instead of the raw IP
-        return "Unknown Domain"
+        # If DNS fails, map known IP prefixes to Organizations
+        if ip.startswith("142.") or ip.startswith("172.217.") or ip.startswith("74.125.") or ip.startswith("172.217"):
+            return "Google Services"
+        elif ip.startswith("20.") or ip.startswith("52.") or ip.startswith("13.107."):
+            return "Microsoft / Azure"
+        elif ip.startswith("104.") or ip.startswith("185.") or ip.startswith("34."):
+            return "Cloudflare / Akamai"
+        elif ip.startswith("140.82."):
+            return "GitHub Services"
+        elif ip.startswith("10.") or ip.startswith("192.168."):
+            return "Local Network"
+        else:
+            return "Unknown External Server"
 
 # Create three tabs
 tab1, tab2, tab3 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner", "🔗 URL Reputation Scanner"])
@@ -89,7 +100,7 @@ with tab1:
             display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
             available_cols = [c for c in display_cols if c in alerts.columns]
             
-            # Add Offline Reverse DNS to Destination IPs
+            # Add Offline Reverse DNS & Organization Mapping
             display_df = alerts[available_cols].iloc[::-1].copy()
             if "dst" in display_df.columns:
                 display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
@@ -160,7 +171,6 @@ with tab3:
             st.warning("Please enter a URL.")
         else:
             with st.spinner("Running lexical analysis..."):
-                # Add http:// if missing for parsing
                 if not url_to_scan.startswith("http"):
                     url_to_scan = "http://" + url_to_scan
                     
@@ -168,38 +178,30 @@ with tab3:
                 domain = parsed.netloc.lower()
                 path = parsed.path.lower()
                 
-                # --- HEURISTIC RULES ---
                 flags = []
                 
-                # 1. Check for IP address instead of domain
                 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain):
                     flags.append("Uses a raw IP address (suspicious)")
                 
-                # 2. Check for suspicious TLDs
                 bad_tlds = [".xyz", ".top", ".club", ".work", ".click", ".link"]
                 if any(domain.endswith(tld) for tld in bad_tlds):
                     flags.append("Uses a high-risk Top Level Domain (TLD)")
                 
-                # 3. Check for too many subdomains (e.g., login.secure.paypal.com.update.com)
                 if domain.count(".") > 3:
                     flags.append("Excessive subdomains (Typosquatting/Phishing)")
                 
-                # 4. Check for sensitive keywords in domain or path
                 keywords = ["login", "secure", "account", "update", "verify", "bank", "signin", "password"]
                 found_kws = [kw for kw in keywords if kw in domain or kw in path]
                 if found_kws:
                     flags.append(f"Contains sensitive keywords: {', '.join(found_kws)}")
                 
-                # 5. Check for URL shorteners (Strict check: must be the exact domain)
                 shorteners = ["bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly"]
                 if domain in shorteners:
                     flags.append("Uses a URL shortener (Hides true destination)")
                 
-                # 6. Check for excessive hyphens
                 if domain.count("-") > 2:
                     flags.append("Excessive hyphens in domain name")
                 
-                # --- CALCULATE RISK ---
                 risk_score = len(flags) * 20
                 risk_score = min(risk_score, 100)
                 
