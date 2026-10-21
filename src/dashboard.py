@@ -23,7 +23,6 @@ text_color = "white" if is_dark else "black"
 st.markdown("""
     <style>
     h1, h2, h3 { font-family: 'Courier New', monospace; }
-    /* This safely styles the metric boxes without breaking the background */
     [data-testid="stMetric"] { 
         background-color: rgba(128, 128, 128, 0.1); 
         padding: 15px; 
@@ -134,17 +133,22 @@ with tab1:
                     display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
                     display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
 
+                # Convert negative anomaly scores to positive 0-100 Threat Scores
+                display_df["Threat Score"] = (display_df["score"].abs() * 100).round(1)
+
                 st.dataframe(
                     display_df, 
                     use_container_width=True,
                     column_config={
-                        "score": st.column_config.ProgressColumn(
-                            "Anomaly Score", 
-                            format="%.4f", 
-                            min_value=0.0,  # 0 is the minimum (Empty bar)
-                            max_value=-1.0, # -1 is the maximum (Full bar)
-                            color="#FF4B4B" # Bright Red
-                        )
+                        "Threat Score": st.column_config.ProgressColumn(
+                            "Threat Level (0-100)",
+                            help="0 = Normal Traffic, 100 = Critical Anomaly",
+                            format="%.1f",
+                            min_value=0,
+                            max_value=100,
+                            color="#FF4B4B" # Bright red bar
+                        ),
+                        "score": None # Hide the raw negative score
                     }
                 )
             else:
