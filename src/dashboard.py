@@ -6,6 +6,9 @@ from supabase import create_client, Client
 import re
 import socket
 from urllib.parse import urlparse
+import time
+import math
+import hashlib
 
 # --- SUPABASE CONFIG ---
 SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
@@ -15,27 +18,42 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="SOC Threat Monitor", layout="wide", menu_items={'Get Help': None, 'Report a bug': None, 'About': "BDA Cyber Threat Detection System"})
 
-# Determine current theme to style charts correctly
 is_dark = st.context.theme.type == "dark"
 text_color = "white" if is_dark else "black"
 
-# Minimal, theme-aware CSS
+# --- CUSTOM CSS FOR FLASHING WARNINGS ---
 st.markdown("""
     <style>
     h1, h2, h3 { font-family: 'Courier New', monospace; }
-    [data-testid="stMetric"] { 
-        background-color: rgba(128, 128, 128, 0.1); 
-        padding: 15px; 
-        border-radius: 10px; 
-        border-left: 5px solid #00FFAA; 
-    }
+    [data-testid="stMetric"] { background-color: rgba(128, 128, 128, 0.1); padding: 15px; border-radius: 10px; border-left: 5px solid #00FFAA; }
+    .critical-warning { background-color: #ff4b4b; color: white; padding: 20px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 24px; animation: flash 1s infinite; border: 3px solid red; }
+    @keyframes flash { 0% { background-color: #ff4b4b; box-shadow: 0 0 20px red; } 50% { background-color: #880000; box-shadow: 0 0 5px red; } 100% { background-color: #ff4b4b; box-shadow: 0 0 20px red; } }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Enterprise SOC & Threat Analytics")
-st.caption("Live Network ML | Batch Ingestion | Unstructured Text & Email Analytics")
+# --- BEEP ALARM FUNCTION (JS) ---
+def play_alarm():
+    js = """
+    <audio id="alarm" autoplay>
+        <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
+    </audio>
+    <script>
+        var audio = document.getElementById("alarm");
+        audio.play().catch(function(e) { console.log("Audio blocked by browser:", e); });
+    </script>
+    """
+    st.components.v1.html(js, height=0)
 
-# Helper function for Offline Reverse DNS & Organization mapping
+# --- JAVASCRIPT POPUP FUNCTION ---
+def show_js_popup(message):
+    js = f"""
+    <script>
+        alert("{message}");
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+
+# Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
 def get_domain_name(ip):
     if re.match(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip) or re.match(r"^192\.168\.\d{1,3}\.\d{1,3}$", ip):
@@ -43,233 +61,241 @@ def get_domain_name(ip):
     try:
         return socket.gethostbyaddr(ip)[0]
     except:
-        if ip.startswith("142.") or ip.startswith("172.217.") or ip.startswith("74.125."): return "Google Services"
-        elif ip.startswith("20.") or ip.startswith("52.") or ip.startswith("13.107."): return "Microsoft / Azure"
-        elif ip.startswith("104.") or ip.startswith("185.") or ip.startswith("34.") or ip.startswith("18.66."): return "Cloudflare / Akamai / AWS"
-        elif ip.startswith("140.82."): return "GitHub Services"
-        else: return "Unknown External Server"
+        return ip
 
-tab1, tab2, tab3 = st.tabs(["🌐 Live Network Traffic", "📄 File & Email Scanner", "🔗 URL Reputation Scanner"])
+# --- BLOOM FILTER LOGIC ---
+class BloomFilter:
+    def __init__(self, expected_items, false_positive_rate):
+        self.size = math.ceil((expected_items * math.log(false_positive_rate)) / math.log(1 / (2 ** math.log(2))))
+        self.hash_count = math.ceil((self.size / expected_items) * math.log(2))
+        self.bit_array = bytearray(self.size)
+    def _hashes(self, item):
+        item = item.encode('utf-8'); hashes = []
+        for i in range(self.hash_count):
+            digest = hashlib.sha256(item + str(i).encode('utf-8')).hexdigest()
+            hashes.append(int(digest, 16) % self.size)
+        return hashes
+    def add(self, item):
+        for hash_val in self._hashes(item): self.bit_array[hash_val] = 1
+    def check(self, item):
+        for hash_val in self._hashes(item):
+            if self.bit_array[hash_val] == 0: return False
+        return True
+
+visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
+popular_sites = ["google.com", "youtube.com", "facebook.com", "amazon.com", "github.com", "flipkart.com"]
+for site in popular_sites: visited_filter.add(site)
+
+# Create Tabs
+tab1, tab2, tab3, tab4 = st.tabs(["🌐 Live Network Traffic", "🛡️ Link Interceptor", "📄 File Scanner", "🔗 URL Reputation"])
 
 # ==========================================
 # TAB 1: LIVE NETWORK TRAFFIC
 # ==========================================
 with tab1:
     dashboard_placeholder = st.empty()
-
     @st.fragment(run_every="2s")
     def render_live_data():
         try:
             response = supabase.table("alerts").select("*").order("id", desc=True).limit(500).execute()
             alerts = pd.DataFrame(response.data)
         except Exception as e:
-            st.error(f"Database connection error: {e}")
+            st.error(f"Database error: {e}")
             return
 
         with dashboard_placeholder.container():
             if not alerts.empty:
                 alerts = alerts.iloc[::-1]
-                
+                recent_attacks = alerts.tail(10)
+                ddos_detected = recent_attacks[recent_attacks["attack_type"].str.contains("DDoS", na=False)].shape[0] > 0
+
                 with st.sidebar:
                     st.markdown("### 🟢 System Status: **ACTIVE**")
-                    st.divider()
-                    st.subheader("Live Metrics")
                     st.metric("Total Alerts", len(alerts))
                     st.metric("Unique Sources", alerts["src"].nunique())
-                    
                     top_attack = alerts["attack_type"].mode()[0] if not alerts["attack_type"].dropna().empty else "None"
                     st.metric("Top Threat", top_attack)
-                    
-                    st.divider()
-                    st.subheader("Database Admin")
                     if st.button("Clear Cloud Database", use_container_width=True):
                         supabase.table("alerts").delete().neq("id", 0).execute()
-                        st.success("Database cleared!")
                         st.rerun()
 
-                col1, col2 = st.columns((2, 1))
+                if ddos_detected:
+                    play_alarm()
+                    st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
+                    st.write("")
+                    if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
+                        supabase.table("alerts").delete().neq("id", 0).execute()
+                        st.rerun()
+
+                # NEW: 3 Columns for Charts
+                col1, col2, col3 = st.columns((2, 1, 1))
                 
                 with col1:
-                    st.subheader("📊 Threat Velocity (Alerts per Minute)")
+                    st.subheader("📊 Threat Velocity")
                     alerts["datetime"] = pd.to_datetime(alerts["timestamp"], errors="coerce")
                     counts = alerts.groupby(alerts["datetime"].dt.floor("min")).size().reset_index(name="count")
-                    
-                    fig = go.Figure(data=[go.Scatter(
-                        x=counts["datetime"], y=counts["count"],
-                        mode='lines+markers',
-                        line=dict(color='#00FFAA', width=3),
-                        fill='tozeroy',
-                        fillcolor='rgba(0, 255, 170, 0.1)'
-                    )])
-                    fig.update_layout(
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color=text_color), margin=dict(l=0, r=0, t=10, b=0),
-                        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'), 
-                        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-                    )
+                    fig = go.Figure(data=[go.Scatter(x=counts["datetime"], y=counts["count"], mode='lines+markers', line=dict(color='#00FFAA', width=3), fill='tozeroy', fillcolor='rgba(0, 255, 170, 0.1)')])
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color))
                     st.plotly_chart(fig, use_container_width=True)
 
                 with col2:
+                    st.subheader("🧠 Bloom Memory")
+                    bf_counts = alerts["attack_type"].value_counts().reset_index()
+                    bf_counts.columns = ["Type", "Count"]
+                    bf_counts = bf_counts[bf_counts["Type"].isin(["NEW Domain", "PREVIOUSLY VISITED"])]
+                    
+                    if not bf_counts.empty:
+                        fig_bf = px.pie(bf_counts, names="Type", values="Count", hole=0.5, 
+                                        color="Type",
+                                        color_discrete_map={"NEW Domain": "#FF4B4B", "PREVIOUSLY VISITED": "#00FFAA"})
+                        fig_bf.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color), showlegend=False)
+                        st.plotly_chart(fig_bf, use_container_width=True)
+                    else:
+                        st.info("No Bloom Filter data yet.")
+
+                with col3:
                     st.subheader("🥧 Attack Vectors")
                     if "protocol" in alerts.columns and not alerts["protocol"].dropna().empty:
                         proto_counts = alerts["protocol"].value_counts().reset_index()
                         proto_counts.columns = ["Protocol", "Count"]
-                        fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.6,
-                                         color_discrete_sequence=px.colors.sequential.Teal)
-                        fig_pie.update_layout(
-                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color=text_color), margin=dict(l=0, r=0, t=10, b=0)
-                        )
+                        fig_pie = px.pie(proto_counts, names="Protocol", values="Count", hole=0.5, color_discrete_sequence=px.colors.sequential.Teal)
+                        fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color))
                         st.plotly_chart(fig_pie, use_container_width=True)
-                    else:
-                        st.info("Waiting for protocol data...")
 
                 st.subheader("📋 Recent Threat Log")
                 display_cols = ["timestamp", "src", "dst", "domain", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
-                
                 display_df = alerts[available_cols].iloc[::-1].copy()
                 if "dst" in display_df.columns:
                     display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
                     display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
-
-                # Convert negative anomaly scores to positive 0-100 Threat Scores
                 display_df["Threat Score"] = (display_df["score"].abs() * 100).round(1)
-
-                st.dataframe(
-                    display_df, 
-                    use_container_width=True,
-                    column_config={
-                        "Threat Score": st.column_config.ProgressColumn(
-                            "Threat Level (0-100)",
-                            help="0 = Normal Traffic, 100 = Critical Anomaly",
-                            format="%.1f",
-                            min_value=0,
-                            max_value=100,
-                            color="#FF4B4B" # Bright red bar
-                        ),
-                        "score": None # Hide the raw negative score
-                    }
-                )
+                st.dataframe(display_df, use_container_width=True, column_config={"Threat Score": st.column_config.ProgressColumn("Threat Level", format="%.1f", min_value=0, max_value=100, color="#FF4B4B"), "score": None})
             else:
-                st.info("Waiting for local sniffer to send data to the cloud...")
-
+                st.info("Waiting for data...")
     render_live_data()
 
 # ==========================================
-# TAB 2: FILE & EMAIL SCANNER
+# TAB 2: LINK INTERCEPTOR (Popup & Block)
 # ==========================================
 with tab2:
-    st.header("📄 Upload Suspicious File or Email")
-    st.write("Upload a `.txt` or `.eml` file. The system will scan it for malicious URLs, suspicious IPs, and phishing keywords.")
+    st.header("🛡️ Secure Link Interceptor")
+    st.write("Paste any URL here. The system will scan it against your Bloom Filter memory and local heuristics before you visit it.")
     
+    target_url = st.text_input("Enter URL to visit (e.g., https://google.com or http://hack-site.xyz):")
+    
+    if st.button("🔍 Scan & Visit Link", use_container_width=True):
+        if not target_url:
+            st.warning("Please enter a URL.")
+        else:
+            if not target_url.startswith("http"):
+                target_url = "http://" + target_url
+                
+            parsed = urlparse(target_url)
+            domain = parsed.netloc.lower()
+            
+            is_known = visited_filter.check(domain)
+            
+            flags = []
+            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain): flags.append("Raw IP Address")
+            if any(domain.endswith(tld) for tld in [".xyz", ".top", ".club", ".click"]): flags.append("High-Risk TLD")
+            if domain.count("-") > 2: flags.append("Excessive Hyphens")
+            
+            risk_score = len(flags) * 30
+            
+            st.divider()
+            st.subheader("Scan Results")
+            
+            if is_known and risk_score == 0:
+                st.success(f"✅ **SAFE:** `{domain}` is in your known website list.")
+                st.markdown(f"[Click here to open {target_url}]({target_url})")
+            
+            elif not is_known and risk_score < 50:
+                st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is NOT in your recent links. Proceed with caution.")
+                st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
+                st.markdown(f"[I understand the risk, take me to {target_url}]({target_url})")
+                visited_filter.add(domain)
+            
+            else:
+                play_alarm()
+                show_js_popup("WARNING: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
+                
+                st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
+                st.write("")
+                st.write("**Detection Flags:**", ", ".join(flags))
+                st.error("🛑 ACCESS BLOCKED BY SOC SYSTEM 🛑")
+                st.write("The system has prevented you from opening this malicious link.")
+
+# ==========================================
+# TAB 3: FILE SCANNER
+# ==========================================
+with tab3:
+    st.header("📄 Upload Suspicious File")
     uploaded_file = st.file_uploader("Choose a file", type=["txt", "eml"])
-    
     if uploaded_file is not None:
         text_content = uploaded_file.getvalue().decode("utf-8", errors="ignore")
         st.text_area("File Content Preview", text_content[:500] + "...", height=150)
-        
         if st.button("🔍 Run Threat Analytics", use_container_width=True):
-            with st.spinner("Analyzing text patterns..."):
-                url_pattern = r'(https?://[^\s]+)'
-                ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-                phishing_keywords = ["urgent", "verify", "password", "bank", "account suspended", "click here", "login"]
-                
-                found_urls = re.findall(url_pattern, text_content)
-                found_ips = re.findall(ip_pattern, text_content)
-                found_keywords = [kw for kw in phishing_keywords if kw in text_content.lower()]
-                
-                risk_score = (len(found_urls) * 20) + (len(found_ips) * 30) + (len(found_keywords) * 15)
-                risk_score = min(risk_score, 100)
-                
-                st.subheader("Analysis Results")
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Risk Score", f"{risk_score}/100")
-                m2.metric("URLs Found", len(found_urls))
-                m3.metric("IPs Found", len(found_ips))
-                m4.metric("Phishing Keywords", len(found_keywords))
-                
-                if risk_score > 50: st.error("🚨 HIGH RISK: Phishing indicators found.")
-                elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
-                else: st.success("✅ LOW RISK: No obvious threats detected.")
-                
-                if found_urls or found_ips or found_keywords:
-                    st.write("### Extracted Threats")
-                    chart_data = pd.DataFrame({"Threat Type": ["URLs", "IPs", "Keywords"], "Count": [len(found_urls), len(found_ips), len(found_keywords)]})
-                    chart_data = chart_data[chart_data["Count"] > 0]
-                    fig = px.bar(chart_data, x="Threat Type", y="Count", color="Threat Type", color_discrete_sequence=px.colors.sequential.Reds_r)
-                    fig.update_layout(
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', 
-                        font=dict(color=text_color)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    if found_urls:
-                        st.write("**Malicious URLs:**")
-                        for u in found_urls: st.code(u)
+            url_pattern = r'(https?://[^\s]+)'
+            found_urls = re.findall(url_pattern, text_content)
+            phishing_keywords = ["urgent", "verify", "password", "bank", "click here", "login"]
+            found_keywords = [kw for kw in phishing_keywords if kw in text_content.lower()]
+            
+            risk_score = (len(found_urls) * 20) + (len(found_keywords) * 15)
+            risk_score = min(risk_score, 100)
+            
+            st.subheader("Analysis Results")
+            m1, m2 = st.columns(2)
+            m1.metric("Risk Score", f"{risk_score}/100")
+            m2.metric("Phishing Keywords", len(found_keywords))
+            
+            if risk_score > 50: 
+                play_alarm()
+                show_js_popup("WARNING: HIGH RISK FILE DETECTED!")
+                st.error("🚨 HIGH RISK: Phishing indicators found.")
+            elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
+            else: st.success("✅ LOW RISK: No obvious threats detected.")
+            
+            if found_urls:
+                st.write("**Malicious URLs:**")
+                for u in found_urls: st.code(u)
 
 # ==========================================
-# TAB 3: OFFLINE URL REPUTATION SCANNER
+# TAB 4: OFFLINE URL SCANNER
 # ==========================================
-with tab3:
+with tab4:
     st.header("🔗 URL Lexical Threat Scanner")
-    st.write("Scan a URL locally using heuristic analysis to detect phishing, typosquatting, and malicious patterns without relying on external APIs.")
-    
     url_to_scan = st.text_input("Enter a URL to scan (e.g., http://paypal-secure-login.com):")
-    
     if st.button("🌐 Scan URL", use_container_width=True):
-        if not url_to_scan:
-            st.warning("Please enter a URL.")
-        else:
-            with st.spinner("Running lexical analysis..."):
-                if not url_to_scan.startswith("http"):
-                    url_to_scan = "http://" + url_to_scan
-                    
-                parsed = urlparse(url_to_scan)
-                domain = parsed.netloc.lower()
-                path = parsed.path.lower()
-                
-                flags = []
-                
-                if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain):
-                    flags.append("Uses a raw IP address (suspicious)")
-                
-                bad_tlds = [".xyz", ".top", ".club", ".work", ".click", ".link"]
-                if any(domain.endswith(tld) for tld in bad_tlds):
-                    flags.append("Uses a high-risk Top Level Domain (TLD)")
-                
-                if domain.count(".") > 3:
-                    flags.append("Excessive subdomains (Typosquatting/Phishing)")
-                
-                keywords = ["login", "secure", "account", "update", "verify", "bank", "signin", "password"]
-                found_kws = [kw for kw in keywords if kw in domain or kw in path]
-                if found_kws:
-                    flags.append(f"Contains sensitive keywords: {', '.join(found_kws)}")
-                
-                shorteners = ["bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly"]
-                if domain in shorteners:
-                    flags.append("Uses a URL shortener (Hides true destination)")
-                
-                if domain.count("-") > 2:
-                    flags.append("Excessive hyphens in domain name")
-                
-                risk_score = len(flags) * 20
-                risk_score = min(risk_score, 100)
-                
-                st.subheader("Scan Results")
-                c1, c2 = st.columns(2)
-                c1.metric("Target Domain", domain)
-                c2.metric("Risk Score", f"{risk_score}/100")
-                
-                if risk_score >= 60:
-                    st.error("🚨 HIGH RISK: This URL exhibits multiple characteristics of a phishing scam.")
-                elif risk_score >= 20:
-                    st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
-                else:
-                    st.success("✅ LOW RISK: No obvious lexical threats detected.")
-                
-                if flags:
-                    st.write("### Detection Flags")
-                    for flag in flags:
-                        st.write(f"- ⚠️ {flag}")
-                else:
-                    st.write("No malicious patterns found in the URL string.")
+        if url_to_scan:
+            if not url_to_scan.startswith("http"): url_to_scan = "http://" + url_to_scan
+            parsed = urlparse(url_to_scan)
+            domain = parsed.netloc.lower()
+            
+            flags = []
+            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain): flags.append("Uses a raw IP address")
+            bad_tlds = [".xyz", ".top", ".club", ".work", ".click", ".link"]
+            if any(domain.endswith(tld) for tld in bad_tlds): flags.append("High-risk TLD")
+            if domain.count(".") > 3: flags.append("Excessive subdomains (Typosquatting)")
+            keywords = ["login", "secure", "account", "update", "verify", "bank"]
+            found_kws = [kw for kw in keywords if kw in domain]
+            if found_kws: flags.append(f"Sensitive keywords: {', '.join(found_kws)}")
+            if domain.count("-") > 2: flags.append("Excessive hyphens")
+            
+            risk_score = min(len(flags) * 20, 100)
+            
+            st.subheader("Scan Results")
+            c1, c2 = st.columns(2)
+            c1.metric("Target Domain", domain)
+            c2.metric("Risk Score", f"{risk_score}/100")
+            
+            if risk_score >= 60:
+                play_alarm()
+                show_js_popup("WARNING: PHISHING URL DETECTED!")
+                st.error("🚨 HIGH RISK: Phishing scam characteristics detected.")
+            elif risk_score >= 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns.")
+            else: st.success("✅ LOW RISK: No obvious threats.")
+            
+            if flags:
+                st.write("### Detection Flags")
+                for flag in flags: st.write(f"- ⚠️ {flag}")

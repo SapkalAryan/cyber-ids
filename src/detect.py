@@ -30,11 +30,8 @@ features = bundle["features"]
 extractor = FlowFeatureExtractor(window_seconds=3)
 
 # --- BLOOM FILTER INITIALIZATION ---
-# 1. Initialize a Bloom Filter for tracking visited domains (allows 10,000 items, 1% false positive rate)
 visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
 
-# 2. Populate a "Popular Websites" baseline (Optional: Since we track visits, we only need the visited filter)
-# But we can pre-populate the visited filter with 50 popular domains so they don't trigger "NEW" alerts immediately
 popular_sites = [
     "google.com", "youtube.com", "facebook.com", "baidu.com", "wikipedia.org", 
     "qq.com", "amazon.com", "tmall.com", "yahoo.com", "yahoo.co.jp", 
@@ -50,7 +47,6 @@ popular_sites = [
 for site in popular_sites:
     visited_filter.add(site)
 
-@st.cache_data(ttl=3600)
 def get_domain(ip):
     try:
         return socket.gethostbyaddr(ip)[0]
@@ -88,13 +84,21 @@ def process_flow(flow_dict):
     proto = flow_dict.get("_proto", "Unknown")
     dport = flow_dict.get("_dport", 0)
     
-    # 1. Resolve Destination IP to Domain (for Bloom Filter checking)
+    # 1. Resolve Destination IP to Domain
     resolved_domain = get_domain(dst_ip)
     
-    # 2. Check Bloom Filter
-    # If the domain resolves to an IP (no domain), we use the IP for tracking
-    tracking_key = resolved_domain if resolved_domain != dst_ip else dst_ip
-    
+    # --- CLEANUP FILTER FOR BETTER TERMINAL OUTPUT ---
+    if "1e100.net" in resolved_domain or "googleusercontent.com" in resolved_domain:
+        resolved_domain = "Google Services (YouTube/Search)"
+    elif "DESKTOP-" in resolved_domain or resolved_domain == src_ip:
+        resolved_domain = "Local Windows Background Traffic"
+    elif "akamai" in resolved_domain or "cloudflare" in resolved_domain:
+        resolved_domain = "CDN (Cloudflare/Akamai)"
+    elif resolved_domain == dst_ip:
+        resolved_domain = f"Unknown External Server ({dst_ip})"
+    # --------------------------------------------------
+
+    tracking_key = resolved_domain
     has_visited = visited_filter.check(tracking_key)
     
     # 3. ML Inference
@@ -109,27 +113,22 @@ def process_flow(flow_dict):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     if not has_visited:
-        # DEFINITELY NEW: Calculate anomaly score normally
-        attack_type = "NEW Domain / Unknown"
+        attack_type = "NEW Domain"
         final_score = ml_score
-        # Add to visited filter so next time it knows
         visited_filter.add(tracking_key)
         print(f"🆕 [NEW DOMAIN] {tracking_key} | Score: {final_score:.3f}")
     else:
-        # POSSIBLY VISITED: Assign a low anomaly score (normal behavior)
         attack_type = "PREVIOUSLY VISITED"
-        final_score = -0.05 # Artificially low anomaly score
+        final_score = -0.05 
         print(f"✅ [VISITED] {tracking_key} | Assigned Low Score: {final_score}")
 
-    # 5. Push to Cloud (We only push if it's NEW, or if the ML model found a real DDoS)
+    # 5. ALWAYS PUSH TO CLOUD so dashboard can visualize the Bloom Filter memory
     is_real_attack = (ml_score < -0.5)
-    if not has_visited or is_real_attack:
-        # If it's a real attack, override the attack type
-        if is_real_attack:
-            attack_type = "DDoS / Anomaly"
-            final_score = ml_score
-            
-        push_alert(ts, src_ip, dst_ip, round(float(final_score), 4), attack_type, proto, dport, tracking_key)
+    if is_real_attack:
+        attack_type = "DDoS / Anomaly"
+        final_score = ml_score
+        
+    push_alert(ts, src_ip, dst_ip, round(float(final_score), 4), attack_type, proto, dport, tracking_key)
 
 def handle_packet(pkt):
     extractor.update(pkt)
@@ -139,11 +138,16 @@ def handle_packet(pkt):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "simulate":
-        # Keep the old simulate logic for DDoS testing
+        print("🔥 [ATTACK SIMULATOR] Injecting 10 DDoS alerts...")
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for i in range(10):
             push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53, "Simulated_Attack")
-        time.sleep(6)
+            print(f"  -> Queued simulated alert {i+1}/10")
+            time.sleep(0.1)
+        
+        print("⏳ Waiting 12 seconds for the batching thread to flush to Supabase...")
+        time.sleep(12)
+        print("✅ Simulation complete. Check your Cloud Dashboard!")
         sys.exit()
         
     threading.Thread(target=flush_buffer, daemon=True).start()
