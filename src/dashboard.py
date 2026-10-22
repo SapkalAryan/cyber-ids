@@ -127,7 +127,6 @@ with tab1:
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
 
-                # NEW: 3 Columns for Charts
                 col1, col2, col3 = st.columns((2, 1, 1))
                 
                 with col1:
@@ -176,23 +175,24 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR (Popup & Block)
+# TAB 2: AUTOMATIC LINK INTERCEPTOR
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
-    st.write("Paste any URL here. The system will scan it against your Bloom Filter memory and local heuristics before you visit it.")
+    st.write("Type or paste a URL and press **Enter**. The system will automatically scan it and display the result.")
     
+    # By putting the logic INSIDE the text_input's if statement, it runs automatically on Enter
     target_url = st.text_input("Enter URL to visit (e.g., https://google.com or http://hack-site.xyz):")
     
-    if st.button("🔍 Scan & Visit Link", use_container_width=True):
-        if not target_url:
-            st.warning("Please enter a URL.")
-        else:
-            if not target_url.startswith("http"):
-                target_url = "http://" + target_url
-                
-            parsed = urlparse(target_url)
-            domain = parsed.netloc.lower()
+    if target_url:
+        if not target_url.startswith("http"):
+            target_url = "http://" + target_url
+            
+        parsed = urlparse(target_url)
+        domain = parsed.netloc.lower()
+        
+        with st.spinner("Scanning URL against Bloom Filter and Heuristics..."):
+            time.sleep(0.5) # Tiny delay for visual effect
             
             is_known = visited_filter.check(domain)
             
@@ -206,16 +206,20 @@ with tab2:
             st.divider()
             st.subheader("Scan Results")
             
+            # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
                 st.success(f"✅ **SAFE:** `{domain}` is in your known website list.")
-                st.markdown(f"[Click here to open {target_url}]({target_url})")
+                st.markdown(f"### [👉 Click here to open {target_url}]({target_url})")
             
+            # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is NOT in your recent links. Proceed with caution.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
-                st.markdown(f"[I understand the risk, take me to {target_url}]({target_url})")
+                st.markdown(f"### [👉 I understand the risk, take me to {target_url}]({target_url})")
+                # Add it to memory for next time
                 visited_filter.add(domain)
             
+            # --- HIGH RISK / SUSPICIOUS URL ---
             else:
                 play_alarm()
                 show_js_popup("WARNING: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
@@ -225,6 +229,8 @@ with tab2:
                 st.write("**Detection Flags:**", ", ".join(flags))
                 st.error("🛑 ACCESS BLOCKED BY SOC SYSTEM 🛑")
                 st.write("The system has prevented you from opening this malicious link.")
+    else:
+        st.info("Waiting for you to type a URL...")
 
 # ==========================================
 # TAB 3: FILE SCANNER
