@@ -125,7 +125,7 @@ with tab1:
                         st.info("Waiting for protocol data...")
 
                 st.subheader("📋 Recent Threat Log")
-                display_cols = ["timestamp", "src", "dst", "attack_type", "protocol", "dst_port", "score"]
+                display_cols = ["timestamp", "src", "dst", "domain", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
                 
                 display_df = alerts[available_cols].iloc[::-1].copy()

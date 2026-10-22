@@ -8,9 +8,10 @@ import threading
 from scapy.all import sniff
 from supabase import create_client, Client
 from datetime import datetime
+import socket
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from features import FlowFeatureExtractor
+from features import FlowFeatureExtractor, BloomFilter
 from schema import FEATURES
 
 SUPABASE_URL = "https://pdnfytydvpbdtgkbvycd.supabase.co"
@@ -28,6 +29,34 @@ features = bundle["features"]
 
 extractor = FlowFeatureExtractor(window_seconds=3)
 
+# --- BLOOM FILTER INITIALIZATION ---
+# 1. Initialize a Bloom Filter for tracking visited domains (allows 10,000 items, 1% false positive rate)
+visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
+
+# 2. Populate a "Popular Websites" baseline (Optional: Since we track visits, we only need the visited filter)
+# But we can pre-populate the visited filter with 50 popular domains so they don't trigger "NEW" alerts immediately
+popular_sites = [
+    "google.com", "youtube.com", "facebook.com", "baidu.com", "wikipedia.org", 
+    "qq.com", "amazon.com", "tmall.com", "yahoo.com", "yahoo.co.jp", 
+    "twitter.com", "instagram.com", "live.com", "vk.com", "sohu.com", 
+    "netflix.com", "reddit.com", "linkedin.com", "microsoft.com", "github.com", 
+    "apple.com", "office.com", "zoom.us", "whatsapp.com", "cloudflare.com", 
+    "bing.com", "pinterest.com", "wordpress.com", "dropbox.com", "adobe.com", 
+    "paypal.com", "ebay.com", "craigslist.org", "twitch.tv", "spotify.com", 
+    "discord.com", "stackoverflow.com", "quora.com", "cnn.com", "bbc.co.uk", 
+    "nytimes.com", "flipkart.com", "myntra.com", "swiggy.com", "zomato.com", 
+    "irctc.co.in", "hdfcbank.com", "icicibank.com", "sbi.co.in", "coursera.org"
+]
+for site in popular_sites:
+    visited_filter.add(site)
+
+@st.cache_data(ttl=3600)
+def get_domain(ip):
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except:
+        return ip
+
 # --- BDA BATCHING LOGIC ---
 alert_buffer = []
 buffer_lock = threading.Lock()
@@ -35,52 +64,72 @@ buffer_lock = threading.Lock()
 def flush_buffer():
     global alert_buffer
     while True:
-        time.sleep(5) # Wait 5 seconds to batch data
+        time.sleep(5) 
         with buffer_lock:
             if alert_buffer:
                 try:
-                    # Bulk Insert to Supabase
                     supabase.table("alerts").insert(alert_buffer).execute()
                     print(f"📦 [BATCH INSERTED] {len(alert_buffer)} alerts to Supabase.")
                     alert_buffer = []
                 except Exception as e:
                     print(f"DB Error: {e}")
 
-def push_alert(ts, src, dst, score, attack_type, proto="Unknown", dport=0):
+def push_alert(ts, src, dst, score, attack_type, proto="Unknown", dport=0, domain="Unknown"):
     with buffer_lock:
         alert_buffer.append({
             "timestamp": ts, "src": src, "dst": dst, "score": score,
             "verdict": "ANOMALY", "attack_type": attack_type,
-            "protocol": proto, "dst_port": dport
+            "protocol": proto, "dst_port": dport, "domain": domain
         })
 
 def process_flow(flow_dict):
+    src_ip = flow_dict.get("_src", "Unknown")
+    dst_ip = flow_dict.get("_dst", "Unknown")
+    proto = flow_dict.get("_proto", "Unknown")
+    dport = flow_dict.get("_dport", 0)
+    
+    # 1. Resolve Destination IP to Domain (for Bloom Filter checking)
+    resolved_domain = get_domain(dst_ip)
+    
+    # 2. Check Bloom Filter
+    # If the domain resolves to an IP (no domain), we use the IP for tracking
+    tracking_key = resolved_domain if resolved_domain != dst_ip else dst_ip
+    
+    has_visited = visited_filter.check(tracking_key)
+    
+    # 3. ML Inference
     X = pd.DataFrame([[flow_dict.get(c, 0.0) for c in features]], columns=features)
     X = X.replace([float("inf"), float("-inf")], 0).fillna(0)
     X_scaled = scaler.transform(X.values)
     
     pred = iso_model.predict(X_scaled)[0]
-    score = iso_model.decision_function(X_scaled)[0]
+    ml_score = iso_model.decision_function(X_scaled)[0]
     
-    if pred == -1:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        total_pkts = flow_dict.get("Total Fwd Packets", 0) + flow_dict.get("Total Backward Packets", 0)
-        pkt_rate = flow_dict.get("Flow Packets/s", 0)
-        
-        if pkt_rate > 1000:
-            attack_type = "DDoS / Flood"
-        elif total_pkts < 5 and pkt_rate > 50:
-            attack_type = "PortScan"
-        else:
-            attack_type = "Zero-Day / Unknown"
+    # 4. Apply Bloom Filter Logic
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    if not has_visited:
+        # DEFINITELY NEW: Calculate anomaly score normally
+        attack_type = "NEW Domain / Unknown"
+        final_score = ml_score
+        # Add to visited filter so next time it knows
+        visited_filter.add(tracking_key)
+        print(f"🆕 [NEW DOMAIN] {tracking_key} | Score: {final_score:.3f}")
+    else:
+        # POSSIBLY VISITED: Assign a low anomaly score (normal behavior)
+        attack_type = "PREVIOUSLY VISITED"
+        final_score = -0.05 # Artificially low anomaly score
+        print(f"✅ [VISITED] {tracking_key} | Assigned Low Score: {final_score}")
+
+    # 5. Push to Cloud (We only push if it's NEW, or if the ML model found a real DDoS)
+    is_real_attack = (ml_score < -0.5)
+    if not has_visited or is_real_attack:
+        # If it's a real attack, override the attack type
+        if is_real_attack:
+            attack_type = "DDoS / Anomaly"
+            final_score = ml_score
             
-        src = flow_dict.get("_src", "Unknown")
-        dst = flow_dict.get("_dst", "Unknown")
-        proto = flow_dict.get("_proto", "Unknown")
-        dport = flow_dict.get("_dport", 0)
-        
-        print(f"🧠 [ML ANOMALY] {src} -> {dst} | Type: {attack_type} | Proto: {proto}")
-        push_alert(ts, src, dst, round(float(score), 4), attack_type, proto, dport)
+        push_alert(ts, src_ip, dst_ip, round(float(final_score), 4), attack_type, proto, dport, tracking_key)
 
 def handle_packet(pkt):
     extractor.update(pkt)
@@ -88,25 +137,17 @@ def handle_packet(pkt):
     for r in ready:
         process_flow(r)
 
-def simulate_attack(attack_type):
-    print(f"\n🔥 INJECTING {attack_type} STREAM...")
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for i in range(10): 
-        if attack_type == "PortScan":
-            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "PortScan (Simulated)", "TCP", 80)
-        else:
-            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53)
-        time.sleep(0.5)
-    time.sleep(6) # Wait for the buffer to flush before exiting
-
 if __name__ == "__main__":
-    # Start the background batching thread
-    threading.Thread(target=flush_buffer, daemon=True).start()
-
     if len(sys.argv) > 1 and sys.argv[1] == "simulate":
-        simulate_attack("DDoS")
+        # Keep the old simulate logic for DDoS testing
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for i in range(10):
+            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53, "Simulated_Attack")
+        time.sleep(6)
         sys.exit()
         
+    threading.Thread(target=flush_buffer, daemon=True).start()
+    
     iface = sys.argv[1] if len(sys.argv) > 1 else "Wi-Fi"
-    print(f"Sniffing on '{iface}' using BDA Micro-Batching...")
+    print(f"Sniffing on '{iface}' with Bloom Filter Tracking...")
     sniff(iface=iface, prn=handle_packet, store=False)
