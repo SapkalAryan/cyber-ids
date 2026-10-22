@@ -82,9 +82,13 @@ class BloomFilter:
             if self.bit_array[hash_val] == 0: return False
         return True
 
-visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
-popular_sites = ["google.com", "youtube.com", "facebook.com", "amazon.com", "github.com", "flipkart.com"]
-for site in popular_sites: visited_filter.add(site)
+# Ensure visited_filter stays in memory across Streamlit reruns
+if "visited_filter" not in st.session_state:
+    st.session_state.visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
+    popular_sites = ["google.com", "youtube.com", "facebook.com", "amazon.com", "github.com", "flipkart.com"]
+    for site in popular_sites: st.session_state.visited_filter.add(site)
+
+visited_filter = st.session_state.visited_filter
 
 # Create Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["🌐 Live Network Traffic", "🛡️ Link Interceptor", "📄 File Scanner", "🔗 URL Reputation"])
@@ -175,13 +179,12 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: AUTOMATIC LINK INTERCEPTOR
+# TAB 2: LINK INTERCEPTOR (Delayed Bloom Insert)
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
-    st.write("Type or paste a URL and press **Enter**. The system will automatically scan it and display the result.")
+    st.write("Type a URL and press **Enter**. The system will automatically scan it and warn you before opening.")
     
-    # By putting the logic INSIDE the text_input's if statement, it runs automatically on Enter
     target_url = st.text_input("Enter URL to visit (e.g., https://google.com or http://hack-site.xyz):")
     
     if target_url:
@@ -191,8 +194,8 @@ with tab2:
         parsed = urlparse(target_url)
         domain = parsed.netloc.lower()
         
-        with st.spinner("Scanning URL against Bloom Filter and Heuristics..."):
-            time.sleep(0.5) # Tiny delay for visual effect
+        with st.spinner("Analyzing link against Bloom Filter and Heuristics..."):
+            time.sleep(0.5)
             
             is_known = visited_filter.check(domain)
             
@@ -208,16 +211,19 @@ with tab2:
             
             # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
-                st.success(f"✅ **SAFE:** `{domain}` is in your known website list.")
-                st.markdown(f"### [👉 Click here to open {target_url}]({target_url})")
+                st.success(f"✅ **SAFE:** `{domain}` is recognized as safe.")
+                st.markdown(f"### [👉 Click here to proceed to {target_url}]({target_url})")
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is NOT in your recent links. Proceed with caution.")
+                st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links. Do you want to proceed?")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
-                st.markdown(f"### [👉 I understand the risk, take me to {target_url}]({target_url})")
-                # Add it to memory for next time
-                visited_filter.add(domain)
+                
+                # We use a session state to store the pending URL so it doesn't get re-added until clicked
+                if st.button("I Understand the Risk, Proceed", type="primary"):
+                    visited_filter.add(domain) # Only add to Bloom Filter if they proceed
+                    st.markdown(f"### [👉 Take me to {target_url}]({target_url})")
+                    st.success("Domain added to your memory.")
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
