@@ -32,36 +32,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ALARM & POPUP JS FUNCTION (FOR LINK INTERCEPTOR) ---
-def trigger_alarm_and_popup(message):
-    js = f"""
-    <button id="alarm-trigger" style="display:none;">Trigger</button>
-    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
-    <script>
-        var audio = document.getElementById("alarm-audio");
-        var trigger = document.getElementById("alarm-trigger");
-        trigger.click();
-        var playPromise = audio.play();
-        if (playPromise !== undefined) {{
-            playPromise.then(_ => {{
-                setTimeout(function() {{
-                    alert("{message}");
-                    audio.pause();
-                    audio.currentTime = 0;
-                }}, 300);
-            }}).catch(error => {{
-                setTimeout(function() {{
-                    alert("{message}");
-                }}, 300);
-            }});
-        }}
-    </script>
-    """
-    components.html(js, height=0)
-
-# --- NATIVE AUDIO ALARM FOR DASHBOARD REFRESH ---
+# --- UNIVERSAL NATIVE AUDIO ALARM ---
 def play_native_alarm():
-    # We use a tiny custom component to play the beep natively
+    # This forces Streamlit to render a native HTML5 audio player, bypassing popup blockers
     st.audio("https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg", format="audio/ogg", autoplay=True)
 
 # Helper function for Reverse DNS
@@ -131,23 +104,27 @@ with tab1:
                     st.metric("Top Threat", top_attack)
                     if st.button("Clear Cloud Database", use_container_width=True):
                         supabase.table("alerts").delete().neq("id", 0).execute()
+                        st.session_state["ddos_alert_playing"] = False
                         st.rerun()
 
                 # --- THE DDoS ALARM LOGIC ---
                 if ddos_detected:
-                    # Use session_state to only play the sound once per attack
+                    # If the attack is detected, trigger the audio alert ONLY ONCE per attack
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
-                        # Play native audio
                         play_native_alarm()
+                        # Trigger the native browser popup too
+                        st.components.v1.html("<script>alert('CRITICAL WARNING: DDoS ATTACK DETECTED!');</script>", height=0)
                     
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
+                    
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
-                        st.session_state["ddos_alert_playing"] = False # Reset the audio flag
+                        st.session_state["ddos_alert_playing"] = False
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
                 else:
+                    # Reset the audio flag if no DDoS is detected
                     st.session_state["ddos_alert_playing"] = False
 
                 col1, col2, col3 = st.columns((2, 1, 1))
@@ -243,7 +220,10 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                trigger_alarm_and_popup(f"WARNING: {domain} is not in your recent links. Proceed with caution.")
+                # PLAY AUDIO
+                play_native_alarm()
+                # TRIGGER POPUP
+                st.components.v1.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
                 
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
@@ -260,7 +240,10 @@ with tab2:
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                trigger_alarm_and_popup("CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
+                # PLAY AUDIO
+                play_native_alarm()
+                # TRIGGER POPUP
+                st.components.v1.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
                 st.write("")
@@ -294,7 +277,8 @@ with tab3:
             m2.metric("Phishing Keywords", len(found_keywords))
             
             if risk_score > 50: 
-                trigger_alarm_and_popup("WARNING: HIGH RISK FILE DETECTED!")
+                play_native_alarm()
+                st.components.v1.html("<script>alert('WARNING: HIGH RISK FILE DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing indicators found.")
             elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
             else: st.success("✅ LOW RISK: No obvious threats detected.")
@@ -333,7 +317,8 @@ with tab4:
             c2.metric("Risk Score", f"{risk_score}/100")
             
             if risk_score >= 60:
-                trigger_alarm_and_popup("WARNING: PHISHING URL DETECTED!")
+                play_native_alarm()
+                st.components.v1.html("<script>alert('WARNING: PHISHING URL DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing scam characteristics detected.")
             elif risk_score >= 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns.")
             else: st.success("✅ LOW RISK: No obvious threats.")
