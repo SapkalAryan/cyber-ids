@@ -32,40 +32,32 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- UNIVERSAL AUDIO, NOTIFICATION & TAB FLASHING ALARM ---
+# --- UNIVERSAL NATIVE AUDIO ALARM ---
 def play_native_alarm():
     js = """
     <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
     <script>
-        // 1. Play Audio
         var audio = document.getElementById("alarm-audio");
-        audio.play().catch(function(e) { console.log("Audio blocked:", e); });
-
-        // 2. Trigger Desktop Notification (Shows even if on another tab)
-        if (Notification.permission === "granted") {
-            new Notification("🚨 CRITICAL WARNING", {
-                body: "DDoS ATTACK DETECTED ON YOUR NETWORK!",
-                icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png"
-            });
-        } else if (Notification.permission !== "denied") {
-            Notification.requestPermission().then(function (permission) {
-                if (permission === "granted") {
-                    new Notification("🚨 CRITICAL WARNING", {
-                        body: "DDoS ATTACK DETECTED ON YOUR NETWORK!",
-                        icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png"
-                    });
-                }
+        var playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(function(error) {
+                setTimeout(function() { audio.play(); }, 500);
             });
         }
+        
+        // Desktop Notification
+        if (Notification.permission === "granted") {
+            new Notification("🚨 CRITICAL WARNING", { body: "DDoS ATTACK DETECTED ON YOUR NETWORK!" });
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
 
-        // 3. Flash the Tab Title
+        // Flash Tab Title
         var isOriginal = false;
         var interval = setInterval(function() {
             document.title = isOriginal ? "🚨 DDoS ATTACK DETECTED 🚨" : "🛡️ SOC Threat Monitor";
             isOriginal = !isOriginal;
         }, 1000);
-        
-        // Stop flashing after 30 seconds to avoid annoyance
         setTimeout(function() { clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }, 30000);
     </script>
     """
@@ -135,7 +127,9 @@ with tab1:
                     st.metric("Total Alerts", len(alerts))
                     st.metric("Unique Sources", alerts["src"].nunique())
                     top_attack = alerts["attack_type"].mode()[0] if not alerts["attack_type"].dropna().empty else "None"
-                    st.metric("Top Threat", top_attack)
+                    # Shorten long text so it fits in the sidebar
+                    display_top = "Visited" if "PREVIOUSLY" in top_attack else top_attack
+                    st.metric("Top Threat", display_top)
                     if st.button("Clear Cloud Database", use_container_width=True):
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.session_state["ddos_alert_playing"] = False
@@ -146,10 +140,7 @@ with tab1:
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
                         
-                        # 1. Play audio & Desktop Notification & Tab Flashing
                         play_native_alarm()
-                        
-                        # 2. Trigger a native browser popup box
                         components.html("<script>alert('🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨');</script>", height=0)
                     
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
@@ -196,14 +187,19 @@ with tab1:
                         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color))
                         st.plotly_chart(fig_pie, use_container_width=True)
 
+                # --- NEW: FLAG SUSPICIOUS DOMAINS ---
                 st.subheader("📋 Recent Threat Log")
+                
+                # Highlight new domains with high threat scores
                 display_cols = ["timestamp", "src", "dst", "domain", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
                 display_df = alerts[available_cols].iloc[::-1].copy()
                 if "dst" in display_df.columns:
                     display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
                     display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
+                
                 display_df["Threat Score"] = (display_df["score"].abs() * 100).round(1)
+                
                 st.dataframe(display_df, use_container_width=True, column_config={"Threat Score": st.column_config.ProgressColumn("Threat Level", format="%.1f", min_value=0, max_value=100, color="#FF4B4B"), "score": None})
             else:
                 st.info("Waiting for data...")
@@ -255,7 +251,6 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                # PLAY AUDIO & POPUP
                 play_native_alarm()
                 components.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
                 
@@ -274,7 +269,6 @@ with tab2:
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                # PLAY AUDIO & POPUP
                 play_native_alarm()
                 components.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
                 
