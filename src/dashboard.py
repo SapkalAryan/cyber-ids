@@ -32,30 +32,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- THE FOOLPROOF AUDIO ALARM ---
-# This creates a hidden button, clicks it automatically to trick the browser, then plays the audio.
+# --- AUDIO ALARM FUNCTION ---
+# We use the HTML 5 audio element directly. This bypasses the auto-refresh block.
 def play_native_alarm():
-    js = """
-    <button id="alarm-trigger" style="display:none;">Trigger</button>
-    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
-    <script>
-        var audio = document.getElementById("alarm-audio");
-        var trigger = document.getElementById("alarm-trigger");
-        
-        // 1. Simulate a click to bypass browser autoplay block
-        trigger.click();
-        
-        // 2. Play the audio
-        var playPromise = audio.play();
-        if (playPromise !== undefined) {
-            playPromise.catch(function(error) {
-                // If it fails, try one more time
-                setTimeout(function() { audio.play(); }, 500);
-            });
-        }
-    </script>
+    audio_html = """
+        <audio autoplay>
+            <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
+        </audio>
     """
-    components.html(js, height=0)
+    components.html(audio_html, height=0)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -132,7 +117,7 @@ with tab1:
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
                         
-                        # 1. Play the sound
+                        # 1. Play the sound using HTML audio
                         play_native_alarm()
                         
                         # 2. Trigger the native browser popup
