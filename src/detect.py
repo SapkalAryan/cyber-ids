@@ -60,7 +60,7 @@ buffer_lock = threading.Lock()
 def flush_buffer():
     global alert_buffer
     while True:
-        time.sleep(5) 
+        time.sleep(1) # CHANGED to 1 second for faster dashboard updates
         with buffer_lock:
             if alert_buffer:
                 try:
@@ -122,7 +122,7 @@ def process_flow(flow_dict):
         final_score = -0.05 
         print(f"✅ [VISITED] {tracking_key} | Assigned Low Score: {final_score}")
 
-    # 5. ALWAYS PUSH TO CLOUD so dashboard can visualize the Bloom Filter memory
+    # 5. ALWAYS PUSH TO CLOUD
     is_real_attack = (ml_score < -0.5)
     if is_real_attack:
         attack_type = "DDoS / Anomaly"
@@ -142,20 +142,30 @@ if __name__ == "__main__":
         print("🚨 [WARNING] INITIATING DDoS ATTACK SIMULATION 🚨")
         print("="*50)
         
-        # Play a beep in the Windows terminal
         print('\a') 
         time.sleep(0.5)
         print('\a') 
         
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for i in range(10):
-            push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53, "Simulated_Attack")
-            print(f"  -> 🔥 Firing simulated attack packet {i+1}/10...")
-            time.sleep(0.2)
+        alerts_to_insert = []
         
-        print("\n⏳ Waiting 12 seconds for the batching thread to flush to Supabase...")
-        time.sleep(12)
-        print("\n✅ [SUCCESS] Simulation complete. Check your Cloud Dashboard to see the visual alert!")
+        for i in range(10):
+            alerts_to_insert.append({
+                "timestamp": ts, "src": "10.98.205.143", "dst": "10.98.205.229", 
+                "score": -0.99, "verdict": "ANOMALY", "attack_type": "DDoS / Flood", 
+                "protocol": "UDP", "dst_port": 53, "domain": "Simulated_Attack"
+            })
+            print(f"  -> 🔥 Preparing simulated attack packet {i+1}/10...")
+            time.sleep(0.1)
+        
+        print("\n🚀 Pushing directly to Supabase...")
+        try:
+            # Bypass the buffer and insert instantly for the demo
+            supabase.table("alerts").insert(alerts_to_insert).execute()
+            print("\n✅ [SUCCESS] 10 DDoS alerts inserted instantly! Check your Cloud Dashboard.")
+        except Exception as e:
+            print(f"\n❌ [ERROR] Failed to insert: {e}")
+            
         sys.exit()
         
     threading.Thread(target=flush_buffer, daemon=True).start()

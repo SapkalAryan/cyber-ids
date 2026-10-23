@@ -92,7 +92,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌐 Live Network Traffic", "🛡️ Link Int
 # ==========================================
 with tab1:
     dashboard_placeholder = st.empty()
-    @st.fragment(run_every="2s")
+    # CHANGED TO 1 SECOND FOR FASTER UPDATES
+    @st.fragment(run_every="1s")
     def render_live_data():
         try:
             response = supabase.table("alerts").select("*").order("id", desc=True).limit(500).execute()
@@ -173,7 +174,7 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR (Native Link Button)
+# TAB 2: LINK INTERCEPTOR
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
@@ -214,7 +215,6 @@ with tab2:
             # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
                 st.success(f"✅ **SAFE:** `{domain}` is recognized as safe.")
-                # This native button is guaranteed to work and won't be blocked
                 st.link_button(f"👉 Click here to open {domain}", target_url, use_container_width=True)
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
@@ -229,7 +229,7 @@ with tab2:
                 if not st.session_state.get(session_key, False):
                     if st.button("I Understand the Risk, Proceed", type="primary"):
                         st.session_state[session_key] = True
-                        visited_filter.add(domain) # Add to Bloom Filter ONLY after clicking
+                        visited_filter.add(domain)
                         st.rerun()
                 else:
                     st.link_button(f"👉 Take me to {domain}", target_url, use_container_width=True)
