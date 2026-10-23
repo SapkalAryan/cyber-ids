@@ -32,18 +32,36 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ALARM & POPUP JS FUNCTION (LOOPS UNTIL CLICKED) ---
+# --- ALARM & POPUP JS FUNCTION (Bypasses Browser Autoplay) ---
 def trigger_alarm_and_popup(message):
+    # We use a hidden button to trick the browser into allowing audio autoplay
     js = f"""
+    <button id="alarm-trigger" style="display:none;">Trigger</button>
+    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
     <script>
-        var audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-        audio.loop = true;
-        audio.play().catch(function(e) {{ console.log("Audio blocked:", e); }});
-        setTimeout(function() {{
-            alert("{message}");
-            audio.pause();
-            audio.currentTime = 0;
-        }}, 300);
+        var audio = document.getElementById("alarm-audio");
+        var trigger = document.getElementById("alarm-trigger");
+        
+        // Simulate a click to bypass autoplay policies
+        trigger.click();
+        
+        // Play the audio
+        var playPromise = audio.play();
+        if (playPromise !== undefined) {{
+            playPromise.then(_ => {{
+                // Audio started playing successfully. Now show the popup.
+                setTimeout(function() {{
+                    alert("{message}");
+                    audio.pause();
+                    audio.currentTime = 0;
+                }}, 300);
+            }}).catch(error => {{
+                // If the browser blocks it, show popup anyway
+                setTimeout(function() {{
+                    alert("{message}");
+                }}, 300);
+            }});
+        }}
     </script>
     """
     components.html(js, height=0)
@@ -92,7 +110,6 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌐 Live Network Traffic", "🛡️ Link Int
 # ==========================================
 with tab1:
     dashboard_placeholder = st.empty()
-    # CHANGED TO 1 SECOND FOR FASTER UPDATES
     @st.fragment(run_every="1s")
     def render_live_data():
         try:
