@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.express as px
 import plotly.graph_objects as go
 from supabase import create_client, Client
@@ -31,27 +32,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BEEP ALARM FUNCTION (JS) ---
-def play_alarm():
-    js = """
-    <audio id="alarm" autoplay>
-        <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
-    </audio>
-    <script>
-        var audio = document.getElementById("alarm");
-        audio.play().catch(function(e) { console.log("Audio blocked by browser:", e); });
-    </script>
-    """
-    st.components.v1.html(js, height=0)
-
-# --- JAVASCRIPT POPUP FUNCTION ---
-def show_js_popup(message):
+# --- ALARM & POPUP JS FUNCTION ---
+def trigger_alarm_and_popup(message):
+    # Uses HTML5 Audio and native JS alert
     js = f"""
     <script>
-        alert("{message}");
+        // Play the alarm sound
+        var audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play().catch(function(e) {{ console.log("Audio blocked:", e); }});
+        
+        // Show the native browser popup
+        setTimeout(function() {{
+            alert("{message}");
+        }}, 300);
     </script>
     """
-    st.components.v1.html(js, height=0)
+    components.html(js, height=0)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -82,7 +78,6 @@ class BloomFilter:
             if self.bit_array[hash_val] == 0: return False
         return True
 
-# Ensure visited_filter stays in memory across Streamlit reruns
 if "visited_filter" not in st.session_state:
     st.session_state.visited_filter = BloomFilter(expected_items=10000, false_positive_rate=0.01)
     popular_sites = ["google.com", "youtube.com", "facebook.com", "amazon.com", "github.com", "flipkart.com"]
@@ -124,7 +119,7 @@ with tab1:
                         st.rerun()
 
                 if ddos_detected:
-                    play_alarm()
+                    trigger_alarm_and_popup("CRITICAL WARNING: DDoS ATTACK DETECTED!")
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
@@ -179,11 +174,11 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR (Delayed Bloom Insert)
+# TAB 2: LINK INTERCEPTOR (Popups & Sounds)
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
-    st.write("Type a URL and press **Enter**. The system will automatically scan it and warn you before opening.")
+    st.write("Type a URL and press **Enter**. The system will automatically scan it.")
     
     target_url = st.text_input("Enter URL to visit (e.g., https://google.com or http://hack-site.xyz):")
     
@@ -194,7 +189,7 @@ with tab2:
         parsed = urlparse(target_url)
         domain = parsed.netloc.lower()
         
-        with st.spinner("Analyzing link against Bloom Filter and Heuristics..."):
+        with st.spinner("Analyzing link..."):
             time.sleep(0.5)
             
             is_known = visited_filter.check(domain)
@@ -216,19 +211,22 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links. Do you want to proceed?")
+                # Trigger alert and sound for MEDIUM risk
+                trigger_alarm_and_popup(f"WARNING: {domain} is not in your recent links. Proceed with caution.")
+                
+                st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
                 
-                # We use a session state to store the pending URL so it doesn't get re-added until clicked
+                # Use checkbox + button to prevent accidental clicking
                 if st.button("I Understand the Risk, Proceed", type="primary"):
-                    visited_filter.add(domain) # Only add to Bloom Filter if they proceed
+                    visited_filter.add(domain)
                     st.markdown(f"### [👉 Take me to {target_url}]({target_url})")
                     st.success("Domain added to your memory.")
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                play_alarm()
-                show_js_popup("WARNING: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
+                # Trigger alert and sound for HIGH risk
+                trigger_alarm_and_popup("CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
                 st.write("")
@@ -262,8 +260,7 @@ with tab3:
             m2.metric("Phishing Keywords", len(found_keywords))
             
             if risk_score > 50: 
-                play_alarm()
-                show_js_popup("WARNING: HIGH RISK FILE DETECTED!")
+                trigger_alarm_and_popup("WARNING: HIGH RISK FILE DETECTED!")
                 st.error("🚨 HIGH RISK: Phishing indicators found.")
             elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
             else: st.success("✅ LOW RISK: No obvious threats detected.")
@@ -302,8 +299,7 @@ with tab4:
             c2.metric("Risk Score", f"{risk_score}/100")
             
             if risk_score >= 60:
-                play_alarm()
-                show_js_popup("WARNING: PHISHING URL DETECTED!")
+                trigger_alarm_and_popup("WARNING: PHISHING URL DETECTED!")
                 st.error("🚨 HIGH RISK: Phishing scam characteristics detected.")
             elif risk_score >= 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns.")
             else: st.success("✅ LOW RISK: No obvious threats.")
