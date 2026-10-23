@@ -124,9 +124,14 @@ with tab1:
                         st.rerun()
 
                 if ddos_detected:
-                    trigger_alarm_and_popup("CRITICAL WARNING: DDoS ATTACK DETECTED!")
+                    # Trigger the looping beep and native browser alert popup
+                    trigger_alarm_and_popup("🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨")
+                    
+                    # Show the flashing red banner on the page
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
+                    
+                    # The Stop Attack button
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()

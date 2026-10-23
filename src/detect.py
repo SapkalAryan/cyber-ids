@@ -138,16 +138,24 @@ def handle_packet(pkt):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "simulate":
-        print("🔥 [ATTACK SIMULATOR] Injecting 10 DDoS alerts...")
+        print("\n" + "="*50)
+        print("🚨 [WARNING] INITIATING DDoS ATTACK SIMULATION 🚨")
+        print("="*50)
+        
+        # Play a beep in the Windows terminal
+        print('\a') 
+        time.sleep(0.5)
+        print('\a') 
+        
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for i in range(10):
             push_alert(ts, "10.98.205.143", "10.98.205.229", -0.99, "DDoS / Flood (Simulated)", "UDP", 53, "Simulated_Attack")
-            print(f"  -> Queued simulated alert {i+1}/10")
-            time.sleep(0.1)
+            print(f"  -> 🔥 Firing simulated attack packet {i+1}/10...")
+            time.sleep(0.2)
         
-        print("⏳ Waiting 12 seconds for the batching thread to flush to Supabase...")
+        print("\n⏳ Waiting 12 seconds for the batching thread to flush to Supabase...")
         time.sleep(12)
-        print("✅ Simulation complete. Check your Cloud Dashboard!")
+        print("\n✅ [SUCCESS] Simulation complete. Check your Cloud Dashboard to see the visual alert!")
         sys.exit()
         
     threading.Thread(target=flush_buffer, daemon=True).start()
