@@ -35,19 +35,18 @@ st.markdown("""
 # --- UNIVERSAL AUDIO, NOTIFICATION & TAB FLASHING ALARM ---
 def play_native_alarm(message="🚨 CRITICAL WARNING"):
     js = f"""
-    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
+    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"></audio>
     <script>
-        // 1. Play Audio
+        // 1. Play Audio (Only once, it will stop on its own)
         var audio = document.getElementById("alarm-audio");
         var playPromise = audio.play();
         if (playPromise !== undefined) {{
             playPromise.catch(function(error) {{
-                // Retry if browser blocks autoplay
                 setTimeout(function() {{ audio.play(); }}, 500);
             }});
         }}
         
-        // 2. Trigger Desktop Notification (Shows even if on another tab)
+        // 2. Trigger Desktop Notification
         if (Notification.permission === "granted") {{
             new Notification("{message}", {{ body: "Security Alert from SOC Monitor" }});
         }} else if (Notification.permission !== "denied") {{
@@ -61,8 +60,8 @@ def play_native_alarm(message="🚨 CRITICAL WARNING"):
             isOriginal = !isOriginal;
         }}, 1000);
         
-        // Stop flashing after 30 seconds
-        setTimeout(function() {{ clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }}, 30000);
+        // Stop flashing after 10 seconds
+        setTimeout(function() {{ clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }}, 10000);
     </script>
     """
     components.html(js, height=0)
