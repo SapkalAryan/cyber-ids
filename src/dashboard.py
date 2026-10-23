@@ -173,7 +173,7 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR (Auto-Open)
+# TAB 2: LINK INTERCEPTOR (Native Link Button)
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
@@ -213,15 +213,9 @@ with tab2:
             
             # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
-                st.success(f"✅ **SAFE:** `{domain}` is recognized as safe. Opening now...")
-                
-                # AUTO-OPEN SCRIPT
-                js_open = f"""
-                <script>
-                    window.open("{target_url}", "_blank");
-                </script>
-                """
-                components.html(js_open, height=0)
+                st.success(f"✅ **SAFE:** `{domain}` is recognized as safe.")
+                # This native button is guaranteed to work and won't be blocked
+                st.link_button(f"👉 Click here to open {domain}", target_url, use_container_width=True)
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
@@ -230,18 +224,15 @@ with tab2:
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
                 
-                # We use a button here because the browser blocks auto-opening unknown links
-                if st.button("I Understand the Risk, Proceed", type="primary"):
-                    visited_filter.add(domain)
-                    st.success(f"✅ Domain added to memory. Opening {target_url}...")
-                    
-                    # AUTO-OPEN SCRIPT
-                    js_open = f"""
-                    <script>
-                        window.open("{target_url}", "_blank");
-                    </script>
-                    """
-                    components.html(js_open, height=0)
+                session_key = f"proceed_{domain}"
+                
+                if not st.session_state.get(session_key, False):
+                    if st.button("I Understand the Risk, Proceed", type="primary"):
+                        st.session_state[session_key] = True
+                        visited_filter.add(domain) # Add to Bloom Filter ONLY after clicking
+                        st.rerun()
+                else:
+                    st.link_button(f"👉 Take me to {domain}", target_url, use_container_width=True)
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
