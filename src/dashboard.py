@@ -32,18 +32,23 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ALARM & POPUP JS FUNCTION ---
+# --- ALARM & POPUP JS FUNCTION (LOOPS UNTIL CLICKED) ---
 def trigger_alarm_and_popup(message):
-    # Uses HTML5 Audio and native JS alert
     js = f"""
     <script>
-        // Play the alarm sound
+        // Create the looping audio
         var audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.loop = true;
+        
+        // Play the audio
         audio.play().catch(function(e) {{ console.log("Audio blocked:", e); }});
         
-        // Show the native browser popup
+        // Show the blocking alert. The script pauses here until the user clicks OK.
         setTimeout(function() {{
             alert("{message}");
+            // Once OK is clicked, stop the audio
+            audio.pause();
+            audio.currentTime = 0;
         }}, 300);
     </script>
     """
@@ -174,11 +179,11 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR (Popups & Sounds)
+# TAB 2: LINK INTERCEPTOR
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
-    st.write("Type a URL and press **Enter**. The system will automatically scan it.")
+    st.write("Type a URL and press **Enter**. The system will scan it automatically.")
     
     target_url = st.text_input("Enter URL to visit (e.g., https://google.com or http://hack-site.xyz):")
     
@@ -211,13 +216,12 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                # Trigger alert and sound for MEDIUM risk
+                # LOOPS ALARM until OK is clicked
                 trigger_alarm_and_popup(f"WARNING: {domain} is not in your recent links. Proceed with caution.")
                 
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
                 
-                # Use checkbox + button to prevent accidental clicking
                 if st.button("I Understand the Risk, Proceed", type="primary"):
                     visited_filter.add(domain)
                     st.markdown(f"### [👉 Take me to {target_url}]({target_url})")
@@ -225,7 +229,7 @@ with tab2:
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                # Trigger alert and sound for HIGH risk
+                # LOOPS ALARM until OK is clicked
                 trigger_alarm_and_popup("CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
