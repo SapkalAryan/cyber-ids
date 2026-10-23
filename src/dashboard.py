@@ -22,13 +22,32 @@ st.set_page_config(page_title="SOC Threat Monitor", layout="wide", menu_items={'
 is_dark = st.context.theme.type == "dark"
 text_color = "white" if is_dark else "black"
 
-# --- CUSTOM CSS FOR FLASHING WARNINGS ---
+# --- CUSTOM CSS FOR FLASHING WARNINGS AND BUTTONS ---
 st.markdown("""
     <style>
     h1, h2, h3 { font-family: 'Courier New', monospace; }
     [data-testid="stMetric"] { background-color: rgba(128, 128, 128, 0.1); padding: 15px; border-radius: 10px; border-left: 5px solid #00FFAA; }
     .critical-warning { background-color: #ff4b4b; color: white; padding: 20px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 24px; animation: flash 1s infinite; border: 3px solid red; }
     @keyframes flash { 0% { background-color: #ff4b4b; box-shadow: 0 0 20px red; } 50% { background-color: #880000; box-shadow: 0 0 5px red; } 100% { background-color: #ff4b4b; box-shadow: 0 0 20px red; } }
+    
+    /* Real HTML Button Styling */
+    .real-link-btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #00FFAA;
+        color: #000000 !important;
+        font-weight: bold;
+        text-align: center;
+        text-decoration: none;
+        border-radius: 8px;
+        font-size: 18px;
+        margin-top: 10px;
+        transition: 0.3s;
+    }
+    .real-link-btn:hover {
+        background-color: #00cc88;
+        box-shadow: 0 0 15px #00FFAA;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -36,17 +55,11 @@ st.markdown("""
 def trigger_alarm_and_popup(message):
     js = f"""
     <script>
-        // Create the looping audio
         var audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
         audio.loop = true;
-        
-        // Play the audio
         audio.play().catch(function(e) {{ console.log("Audio blocked:", e); }});
-        
-        // Show the blocking alert. The script pauses here until the user clicks OK.
         setTimeout(function() {{
             alert("{message}");
-            // Once OK is clicked, stop the audio
             audio.pause();
             audio.currentTime = 0;
         }}, 300);
@@ -124,14 +137,9 @@ with tab1:
                         st.rerun()
 
                 if ddos_detected:
-                    # Trigger the looping beep and native browser alert popup
                     trigger_alarm_and_popup("🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨")
-                    
-                    # Show the flashing red banner on the page
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
-                    
-                    # The Stop Attack button
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
@@ -184,7 +192,7 @@ with tab1:
     render_live_data()
 
 # ==========================================
-# TAB 2: LINK INTERCEPTOR
+# TAB 2: LINK INTERCEPTOR (Real Navigation)
 # ==========================================
 with tab2:
     st.header("🛡️ Secure Link Interceptor")
@@ -213,7 +221,7 @@ with tab2:
                 
             if any(domain.endswith(tld) for tld in [".xyz", ".top", ".club", ".click"]): 
                 flags.append("High-Risk TLD")
-                risk_score += 60 # Any .xyz link is instantly HIGH RISK
+                risk_score += 60
                 
             if domain.count("-") > 2: 
                 flags.append("Excessive Hyphens")
@@ -225,24 +233,30 @@ with tab2:
             # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
                 st.success(f"✅ **SAFE:** `{domain}` is recognized as safe.")
-                st.markdown(f"### [👉 Click here to proceed to {target_url}]({target_url})")
+                
+                # REAL HTML BUTTON
+                st.markdown(f'<a href="{target_url}" target="_blank" class="real-link-btn">👉 Click here to open {domain}</a>', unsafe_allow_html=True)
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                # LOOPS ALARM until OK is clicked
                 trigger_alarm_and_popup(f"WARNING: {domain} is not in your recent links. Proceed with caution.")
                 
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
                 
-                if st.button("I Understand the Risk, Proceed", type="primary"):
-                    visited_filter.add(domain)
-                    st.markdown(f"### [👉 Take me to {target_url}]({target_url})")
-                    st.success("Domain added to your memory.")
+                # Two-step process for Medium Risk
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("I Understand the Risk, Proceed", type="primary"):
+                        st.session_state.proceed_medium = True
+                with col2:
+                    # Show the button only if they clicked "I Understand"
+                    if st.session_state.get("proceed_medium", False):
+                        visited_filter.add(domain)
+                        st.markdown(f'<a href="{target_url}" target="_blank" class="real-link-btn">👉 Take me to {domain}</a>', unsafe_allow_html=True)
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                # LOOPS ALARM until OK is clicked
                 trigger_alarm_and_popup("CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.")
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
