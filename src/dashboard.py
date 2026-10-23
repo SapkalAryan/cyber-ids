@@ -32,33 +32,37 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- UNIVERSAL NATIVE AUDIO ALARM ---
-def play_native_alarm():
-    js = """
+# --- UNIVERSAL AUDIO, NOTIFICATION & TAB FLASHING ALARM ---
+def play_native_alarm(message="🚨 CRITICAL WARNING"):
+    js = f"""
     <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
     <script>
+        // 1. Play Audio
         var audio = document.getElementById("alarm-audio");
         var playPromise = audio.play();
-        if (playPromise !== undefined) {
-            playPromise.catch(function(error) {
-                setTimeout(function() { audio.play(); }, 500);
-            });
-        }
+        if (playPromise !== undefined) {{
+            playPromise.catch(function(error) {{
+                // Retry if browser blocks autoplay
+                setTimeout(function() {{ audio.play(); }}, 500);
+            }});
+        }}
         
-        // Desktop Notification
-        if (Notification.permission === "granted") {
-            new Notification("🚨 CRITICAL WARNING", { body: "DDoS ATTACK DETECTED ON YOUR NETWORK!" });
-        } else if (Notification.permission !== "denied") {
+        // 2. Trigger Desktop Notification (Shows even if on another tab)
+        if (Notification.permission === "granted") {{
+            new Notification("{message}", {{ body: "Security Alert from SOC Monitor" }});
+        }} else if (Notification.permission !== "denied") {{
             Notification.requestPermission();
-        }
+        }}
 
-        // Flash Tab Title
+        // 3. Flash the Tab Title
         var isOriginal = false;
-        var interval = setInterval(function() {
-            document.title = isOriginal ? "🚨 DDoS ATTACK DETECTED 🚨" : "🛡️ SOC Threat Monitor";
+        var interval = setInterval(function() {{
+            document.title = isOriginal ? "{message}" : "🛡️ SOC Threat Monitor";
             isOriginal = !isOriginal;
-        }, 1000);
-        setTimeout(function() { clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }, 30000);
+        }}, 1000);
+        
+        // Stop flashing after 30 seconds
+        setTimeout(function() {{ clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }}, 30000);
     </script>
     """
     components.html(js, height=0)
@@ -127,7 +131,6 @@ with tab1:
                     st.metric("Total Alerts", len(alerts))
                     st.metric("Unique Sources", alerts["src"].nunique())
                     top_attack = alerts["attack_type"].mode()[0] if not alerts["attack_type"].dropna().empty else "None"
-                    # Shorten long text so it fits in the sidebar
                     display_top = "Visited" if "PREVIOUSLY" in top_attack else top_attack
                     st.metric("Top Threat", display_top)
                     if st.button("Clear Cloud Database", use_container_width=True):
@@ -140,7 +143,8 @@ with tab1:
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
                         
-                        play_native_alarm()
+                        # Trigger alarm with DDoS specific message
+                        play_native_alarm("🚨 DDoS Attack Detected")
                         components.html("<script>alert('🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨');</script>", height=0)
                     
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
@@ -187,19 +191,14 @@ with tab1:
                         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color))
                         st.plotly_chart(fig_pie, use_container_width=True)
 
-                # --- NEW: FLAG SUSPICIOUS DOMAINS ---
                 st.subheader("📋 Recent Threat Log")
-                
-                # Highlight new domains with high threat scores
                 display_cols = ["timestamp", "src", "dst", "domain", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
                 display_df = alerts[available_cols].iloc[::-1].copy()
                 if "dst" in display_df.columns:
                     display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
                     display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
-                
                 display_df["Threat Score"] = (display_df["score"].abs() * 100).round(1)
-                
                 st.dataframe(display_df, use_container_width=True, column_config={"Threat Score": st.column_config.ProgressColumn("Threat Level", format="%.1f", min_value=0, max_value=100, color="#FF4B4B"), "score": None})
             else:
                 st.info("Waiting for data...")
@@ -251,7 +250,8 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                play_native_alarm()
+                # Trigger alarm with Medium Risk specific message
+                play_native_alarm(f"⚠️ Suspicious Link: {domain}")
                 components.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
                 
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
@@ -269,7 +269,8 @@ with tab2:
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                play_native_alarm()
+                # Trigger alarm with High Risk specific message
+                play_native_alarm("🚨 Malicious Link Blocked")
                 components.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
@@ -304,7 +305,7 @@ with tab3:
             m2.metric("Phishing Keywords", len(found_keywords))
             
             if risk_score > 50: 
-                play_native_alarm()
+                play_native_alarm("🚨 High Risk File Detected")
                 components.html("<script>alert('WARNING: HIGH RISK FILE DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing indicators found.")
             elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
@@ -344,7 +345,7 @@ with tab4:
             c2.metric("Risk Score", f"{risk_score}/100")
             
             if risk_score >= 60:
-                play_native_alarm()
+                play_native_alarm("🚨 Phishing URL Detected")
                 components.html("<script>alert('WARNING: PHISHING URL DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing scam characteristics detected.")
             elif risk_score >= 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns.")
