@@ -37,44 +37,27 @@ def play_native_alarm(message="🚨 CRITICAL WARNING"):
     js = f"""
     <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"></audio>
     <script>
-        // 1. Play Audio (Only once, it will stop on its own)
         var audio = document.getElementById("alarm-audio");
         var playPromise = audio.play();
         if (playPromise !== undefined) {{
-            playPromise.catch(function(error) {{
-                setTimeout(function() {{ audio.play(); }}, 500);
-            }});
+            playPromise.catch(function(error) {{ setTimeout(function() {{ audio.play(); }}, 500); }});
         }}
         
-        // 2. Trigger Desktop Notification
         if (Notification.permission === "granted") {{
             new Notification("{message}", {{ body: "Security Alert from SOC Monitor" }});
         }} else if (Notification.permission !== "denied") {{
             Notification.requestPermission();
         }}
 
-        // 3. Flash the Tab Title
         var isOriginal = false;
         var interval = setInterval(function() {{
             document.title = isOriginal ? "{message}" : "🛡️ SOC Threat Monitor";
             isOriginal = !isOriginal;
         }}, 1000);
-        
-        // Stop flashing after 10 seconds
         setTimeout(function() {{ clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }}, 10000);
     </script>
     """
     components.html(js, height=0)
-
-# Helper function for Reverse DNS
-@st.cache_data(ttl=3600)
-def get_domain_name(ip):
-    if re.match(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip) or re.match(r"^192\.168\.\d{1,3}\.\d{1,3}$", ip):
-        return "Local Network"
-    try:
-        return socket.gethostbyaddr(ip)[0]
-    except:
-        return ip
 
 # --- BLOOM FILTER LOGIC ---
 class BloomFilter:
@@ -110,7 +93,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌐 Live Network Traffic", "🛡️ Link Int
 # ==========================================
 with tab1:
     dashboard_placeholder = st.empty()
-    @st.fragment(run_every="1s")
+    @st.fragment(run_every="2s")
     def render_live_data():
         try:
             response = supabase.table("alerts").select("*").order("id", desc=True).limit(500).execute()
@@ -137,12 +120,9 @@ with tab1:
                         st.session_state["ddos_alert_playing"] = False
                         st.rerun()
 
-                # --- THE DDoS ALARM LOGIC ---
                 if ddos_detected:
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
-                        
-                        # Trigger alarm with DDoS specific message
                         play_native_alarm("🚨 DDoS Attack Detected")
                         components.html("<script>alert('🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨');</script>", height=0)
                     
@@ -194,9 +174,14 @@ with tab1:
                 display_cols = ["timestamp", "src", "dst", "domain", "attack_type", "protocol", "dst_port", "score"]
                 available_cols = [c for c in display_cols if c in alerts.columns]
                 display_df = alerts[available_cols].iloc[::-1].copy()
-                if "dst" in display_df.columns:
-                    display_df["dst_domain"] = display_df["dst"].apply(get_domain_name)
-                    display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
+                
+                # We no longer do reverse DNS inside the dashboard to prevent crashes
+                if "domain" in display_df.columns:
+                    display_df["dst_domain"] = display_df["domain"]
+                else:
+                    display_df["dst_domain"] = display_df["dst"]
+
+                display_df = display_df[["timestamp", "src", "dst", "dst_domain", "attack_type", "protocol", "dst_port", "score"]]
                 display_df["Threat Score"] = (display_df["score"].abs() * 100).round(1)
                 st.dataframe(display_df, use_container_width=True, column_config={"Threat Score": st.column_config.ProgressColumn("Threat Level", format="%.1f", min_value=0, max_value=100, color="#FF4B4B"), "score": None})
             else:
@@ -242,14 +227,11 @@ with tab2:
             st.divider()
             st.subheader("Scan Results")
             
-            # --- LOW RISK / KNOWN DOMAIN ---
             if is_known and risk_score == 0:
                 st.success(f"✅ **SAFE:** `{domain}` is recognized as safe.")
                 st.link_button(f"👉 Click here to open {domain}", target_url, use_container_width=True)
             
-            # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                # Trigger alarm with Medium Risk specific message
                 play_native_alarm(f"⚠️ Suspicious Link: {domain}")
                 components.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
                 
@@ -266,9 +248,7 @@ with tab2:
                 else:
                     st.link_button(f"👉 Take me to {domain}", target_url, use_container_width=True)
             
-            # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                # Trigger alarm with High Risk specific message
                 play_native_alarm("🚨 Malicious Link Blocked")
                 components.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
                 
