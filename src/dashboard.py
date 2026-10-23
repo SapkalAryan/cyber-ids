@@ -32,15 +32,44 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- AUDIO ALARM FUNCTION ---
-# We use the HTML 5 audio element directly. This bypasses the auto-refresh block.
+# --- UNIVERSAL AUDIO, NOTIFICATION & TAB FLASHING ALARM ---
 def play_native_alarm():
-    audio_html = """
-        <audio autoplay>
-            <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
-        </audio>
+    js = """
+    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
+    <script>
+        // 1. Play Audio
+        var audio = document.getElementById("alarm-audio");
+        audio.play().catch(function(e) { console.log("Audio blocked:", e); });
+
+        // 2. Trigger Desktop Notification (Shows even if on another tab)
+        if (Notification.permission === "granted") {
+            new Notification("🚨 CRITICAL WARNING", {
+                body: "DDoS ATTACK DETECTED ON YOUR NETWORK!",
+                icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png"
+            });
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(function (permission) {
+                if (permission === "granted") {
+                    new Notification("🚨 CRITICAL WARNING", {
+                        body: "DDoS ATTACK DETECTED ON YOUR NETWORK!",
+                        icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png"
+                    });
+                }
+            });
+        }
+
+        // 3. Flash the Tab Title
+        var isOriginal = false;
+        var interval = setInterval(function() {
+            document.title = isOriginal ? "🚨 DDoS ATTACK DETECTED 🚨" : "🛡️ SOC Threat Monitor";
+            isOriginal = !isOriginal;
+        }, 1000);
+        
+        // Stop flashing after 30 seconds to avoid annoyance
+        setTimeout(function() { clearInterval(interval); document.title = "🛡️ SOC Threat Monitor"; }, 30000);
+    </script>
     """
-    components.html(audio_html, height=0)
+    components.html(js, height=0)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -117,17 +146,15 @@ with tab1:
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
                         
-                        # 1. Play the sound using HTML audio
+                        # 1. Play audio & Desktop Notification & Tab Flashing
                         play_native_alarm()
                         
-                        # 2. Trigger the native browser popup
+                        # 2. Trigger a native browser popup box
                         components.html("<script>alert('🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨');</script>", height=0)
                     
-                    # 3. Show the visual red banner
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
                     
-                    # 4. Stop Attack Button
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
                         st.session_state["ddos_alert_playing"] = False
                         supabase.table("alerts").delete().neq("id", 0).execute()
