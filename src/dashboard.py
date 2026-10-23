@@ -34,8 +34,13 @@ st.markdown("""
 
 # --- UNIVERSAL NATIVE AUDIO ALARM ---
 def play_native_alarm():
-    # This forces Streamlit to render a native HTML5 audio player, bypassing popup blockers
-    st.audio("https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg", format="audio/ogg", autoplay=True)
+    # Renders a hidden HTML audio tag that forces autoplay
+    audio_html = """
+        <audio autoplay>
+            <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
+        </audio>
+    """
+    components.html(audio_html, height=0)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -109,16 +114,20 @@ with tab1:
 
                 # --- THE DDoS ALARM LOGIC ---
                 if ddos_detected:
-                    # If the attack is detected, trigger the audio alert ONLY ONCE per attack
                     if not st.session_state.get("ddos_alert_playing", False):
                         st.session_state["ddos_alert_playing"] = True
+                        
+                        # 1. Play the sound
                         play_native_alarm()
-                        # Trigger the native browser popup too
-                        st.components.v1.html("<script>alert('CRITICAL WARNING: DDoS ATTACK DETECTED!');</script>", height=0)
+                        
+                        # 2. Trigger the native browser popup
+                        components.html("<script>alert('CRITICAL WARNING: DDoS ATTACK DETECTED!');</script>", height=0)
                     
+                    # 3. Show the visual red banner
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
                     
+                    # 4. Stop Attack Button
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
                         st.session_state["ddos_alert_playing"] = False
                         supabase.table("alerts").delete().neq("id", 0).execute()
@@ -220,10 +229,9 @@ with tab2:
             
             # --- MEDIUM RISK / UNKNOWN DOMAIN ---
             elif not is_known and risk_score < 50:
-                # PLAY AUDIO
+                # PLAY AUDIO & POPUP
                 play_native_alarm()
-                # TRIGGER POPUP
-                st.components.v1.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
+                components.html(f"<script>alert('WARNING: {domain} is not in your recent links.');</script>", height=0)
                 
                 st.warning(f"⚠️ **MEDIUM WARNING:** `{domain}` is **NOT** in your recent links.")
                 st.write("**Detection Flags:**", ", ".join(flags) if flags else "None")
@@ -240,10 +248,9 @@ with tab2:
             
             # --- HIGH RISK / SUSPICIOUS URL ---
             else:
-                # PLAY AUDIO
+                # PLAY AUDIO & POPUP
                 play_native_alarm()
-                # TRIGGER POPUP
-                st.components.v1.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
+                components.html("<script>alert('CRITICAL: MALICIOUS LINK DETECTED! ACCESS BLOCKED.');</script>", height=0)
                 
                 st.markdown(f'<div class="critical-warning">🚨 CRITICAL WARNING 🚨<br>This URL looks like a Phishing Attack!<br>Risk Score: {risk_score}/100</div>', unsafe_allow_html=True)
                 st.write("")
@@ -278,7 +285,7 @@ with tab3:
             
             if risk_score > 50: 
                 play_native_alarm()
-                st.components.v1.html("<script>alert('WARNING: HIGH RISK FILE DETECTED!');</script>", height=0)
+                components.html("<script>alert('WARNING: HIGH RISK FILE DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing indicators found.")
             elif risk_score > 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns detected.")
             else: st.success("✅ LOW RISK: No obvious threats detected.")
@@ -318,7 +325,7 @@ with tab4:
             
             if risk_score >= 60:
                 play_native_alarm()
-                st.components.v1.html("<script>alert('WARNING: PHISHING URL DETECTED!');</script>", height=0)
+                components.html("<script>alert('WARNING: PHISHING URL DETECTED!');</script>", height=0)
                 st.error("🚨 HIGH RISK: Phishing scam characteristics detected.")
             elif risk_score >= 20: st.warning("⚠️ MEDIUM RISK: Suspicious patterns.")
             else: st.success("✅ LOW RISK: No obvious threats.")
