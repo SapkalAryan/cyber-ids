@@ -32,15 +32,30 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- UNIVERSAL NATIVE AUDIO ALARM ---
+# --- THE FOOLPROOF AUDIO ALARM ---
+# This creates a hidden button, clicks it automatically to trick the browser, then plays the audio.
 def play_native_alarm():
-    # Renders a hidden HTML audio tag that forces autoplay
-    audio_html = """
-        <audio autoplay>
-            <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
-        </audio>
+    js = """
+    <button id="alarm-trigger" style="display:none;">Trigger</button>
+    <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
+    <script>
+        var audio = document.getElementById("alarm-audio");
+        var trigger = document.getElementById("alarm-trigger");
+        
+        // 1. Simulate a click to bypass browser autoplay block
+        trigger.click();
+        
+        // 2. Play the audio
+        var playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(function(error) {
+                // If it fails, try one more time
+                setTimeout(function() { audio.play(); }, 500);
+            });
+        }
+    </script>
     """
-    components.html(audio_html, height=0)
+    components.html(js, height=0)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -121,7 +136,7 @@ with tab1:
                         play_native_alarm()
                         
                         # 2. Trigger the native browser popup
-                        components.html("<script>alert('CRITICAL WARNING: DDoS ATTACK DETECTED!');</script>", height=0)
+                        components.html("<script>alert('🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨');</script>", height=0)
                     
                     # 3. Show the visual red banner
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
@@ -133,7 +148,6 @@ with tab1:
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
                 else:
-                    # Reset the audio flag if no DDoS is detected
                     st.session_state["ddos_alert_playing"] = False
 
                 col1, col2, col3 = st.columns((2, 1, 1))
