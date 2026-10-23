@@ -205,11 +205,19 @@ with tab2:
             is_known = visited_filter.check(domain)
             
             flags = []
-            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain): flags.append("Raw IP Address")
-            if any(domain.endswith(tld) for tld in [".xyz", ".top", ".club", ".click"]): flags.append("High-Risk TLD")
-            if domain.count("-") > 2: flags.append("Excessive Hyphens")
+            risk_score = 0
             
-            risk_score = len(flags) * 30
+            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain): 
+                flags.append("Raw IP Address")
+                risk_score += 50
+                
+            if any(domain.endswith(tld) for tld in [".xyz", ".top", ".club", ".click"]): 
+                flags.append("High-Risk TLD")
+                risk_score += 60 # Any .xyz link is instantly HIGH RISK
+                
+            if domain.count("-") > 2: 
+                flags.append("Excessive Hyphens")
+                risk_score += 30
             
             st.divider()
             st.subheader("Scan Results")
