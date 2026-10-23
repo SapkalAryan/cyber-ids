@@ -32,31 +32,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ALARM & POPUP JS FUNCTION (Bypasses Browser Autoplay) ---
+# --- ALARM & POPUP JS FUNCTION (FOR LINK INTERCEPTOR) ---
 def trigger_alarm_and_popup(message):
-    # We use a hidden button to trick the browser into allowing audio autoplay
     js = f"""
     <button id="alarm-trigger" style="display:none;">Trigger</button>
     <audio id="alarm-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" loop></audio>
     <script>
         var audio = document.getElementById("alarm-audio");
         var trigger = document.getElementById("alarm-trigger");
-        
-        // Simulate a click to bypass autoplay policies
         trigger.click();
-        
-        // Play the audio
         var playPromise = audio.play();
         if (playPromise !== undefined) {{
             playPromise.then(_ => {{
-                // Audio started playing successfully. Now show the popup.
                 setTimeout(function() {{
                     alert("{message}");
                     audio.pause();
                     audio.currentTime = 0;
                 }}, 300);
             }}).catch(error => {{
-                // If the browser blocks it, show popup anyway
                 setTimeout(function() {{
                     alert("{message}");
                 }}, 300);
@@ -65,6 +58,11 @@ def trigger_alarm_and_popup(message):
     </script>
     """
     components.html(js, height=0)
+
+# --- NATIVE AUDIO ALARM FOR DASHBOARD REFRESH ---
+def play_native_alarm():
+    # We use a tiny custom component to play the beep natively
+    st.audio("https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg", format="audio/ogg", autoplay=True)
 
 # Helper function for Reverse DNS
 @st.cache_data(ttl=3600)
@@ -135,13 +133,22 @@ with tab1:
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
 
+                # --- THE DDoS ALARM LOGIC ---
                 if ddos_detected:
-                    trigger_alarm_and_popup("🚨 CRITICAL WARNING: DDoS ATTACK DETECTED! 🚨")
+                    # Use session_state to only play the sound once per attack
+                    if not st.session_state.get("ddos_alert_playing", False):
+                        st.session_state["ddos_alert_playing"] = True
+                        # Play native audio
+                        play_native_alarm()
+                    
                     st.markdown('<div class="critical-warning">🚨 CRITICAL WARNING: DDoS ATTACK DETECTED 🚨</div>', unsafe_allow_html=True)
                     st.write("")
                     if st.button("🛑 STOP ATTACK (Clear DB)", type="primary", use_container_width=True):
+                        st.session_state["ddos_alert_playing"] = False # Reset the audio flag
                         supabase.table("alerts").delete().neq("id", 0).execute()
                         st.rerun()
+                else:
+                    st.session_state["ddos_alert_playing"] = False
 
                 col1, col2, col3 = st.columns((2, 1, 1))
                 
